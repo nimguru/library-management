@@ -27,6 +27,12 @@ export async function GET(
     const { id } = await params
     const book = await prisma.book.findUnique({
       where: { id },
+      select: {
+        id: true, title: true, author: true, isbn: true,
+        genres: true, description: true, coverUrl: true,
+        price: true, isFree: true, publishedYear: true,
+        pageCount: true, language: true, createdAt: true,
+      }
     })
 
     if (!book) {
@@ -45,7 +51,7 @@ export async function PATCH(
 ) {
   try {
     const session = await auth()
-    // @ts-ignore
+    
     if (session?.user?.role !== "ADMIN") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
@@ -81,7 +87,7 @@ export async function DELETE(
 ) {
   try {
     const session = await auth()
-    // @ts-ignore
+    
     if (session?.user?.role !== "ADMIN") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }

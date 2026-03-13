@@ -6,7 +6,7 @@ export async function GET(req: Request) {
   try {
     const session = await auth()
     
-    // @ts-ignore
+    
     if (session?.user?.role !== "ADMIN") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
     }
@@ -61,7 +61,7 @@ export async function PATCH(req: Request) {
   try {
     const session = await auth()
     
-    // @ts-ignore
+    
     if (session?.user?.role !== "ADMIN") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
     }
@@ -70,6 +70,11 @@ export async function PATCH(req: Request) {
 
     if (!userId || !role) {
       return NextResponse.json({ error: "Missing userId or role" }, { status: 400 })
+    }
+
+    const validRoles = ['ADMIN', 'MEMBER'] as const
+    if (!validRoles.includes(role)) {
+      return NextResponse.json({ error: "Invalid role" }, { status: 400 })
     }
 
     const updatedUser = await prisma.user.update({

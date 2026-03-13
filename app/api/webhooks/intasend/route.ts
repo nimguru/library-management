@@ -44,7 +44,8 @@ export async function POST(req: Request) {
     })
 
     if (!order) {
-      return NextResponse.json({ error: "Order not found" }, { status: 404 })
+      console.warn("Webhook received for unknown orderId:", orderId)
+      return NextResponse.json({ message: "Order not found, ignoring" }, { status: 200 })
     }
 
     if (order.status === 'PAID') {

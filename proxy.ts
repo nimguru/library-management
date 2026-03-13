@@ -4,7 +4,7 @@ import { NextResponse } from "next/server"
 export default auth((req) => {
   const { pathname } = req.nextUrl
   const isLoggedIn = !!req.auth
-  // @ts-ignore
+  
   const isAdmin = req.auth?.user?.role === 'ADMIN'
 
   // Protect dashboard routes

@@ -1,4 +1,4 @@
-// @ts-ignore
+
 import IntaSend from 'intasend-node'
 
 export const intasend = new IntaSend(

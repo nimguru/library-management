@@ -14,7 +14,10 @@ export async function GET(
 
     const { id } = await params
     const order = await prisma.order.findUnique({
-      where: { id },
+      where: { 
+        id,
+        userId: session.user.id
+      },
       include: {
         items: {
           include: {
@@ -32,11 +35,6 @@ export async function GET(
 
     if (!order) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 })
-    }
-
-    // Verify ownership
-    if (order.userId !== session.user.id) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
 
     return NextResponse.json(order)

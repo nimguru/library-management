@@ -40,16 +40,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     jwt({ token, user }) {
       if (user) {
         token.id = user.id
-        // @ts-ignore
+        
         token.role = user.role
       }
       return token
     },
     session({ session, token }) {
       if (session.user) {
-        // @ts-ignore
+        
         session.user.id = token.id as string
-        // @ts-ignore
+        
         session.user.role = token.role as string
       }
       return session
@@ -57,5 +57,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   },
   pages: {
     signIn: '/login',
-  }
+  },
+  trustHost: true
 })

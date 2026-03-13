@@ -22,26 +22,44 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "No valid books found" }, { status: 400 })
     }
 
-    const total = books.reduce((sum: number, book: any) => sum + Number(book.price), 0)
-    const isFree = total === 0
+    if (books.length !== bookIds.length) {
+      return NextResponse.json({ error: "One or more books could not be found" }, { status: 400 })
+    }
 
-    // Create order in DB
-    const order = await prisma.order.create({
-      data: {
+    const existingDownloads = await prisma.download.findMany({
+      where: {
         userId: session.user.id!,
-        totalAmount: total,
-        status: isFree ? "PAID" : "PENDING",
-        items: {
-          create: books.map((book: any) => ({
-            bookId: book.id,
-            price: book.price
-          }))
-        }
+        bookId: { in: bookIds }
       }
     })
 
-    // If free, create download records immediately and return success URL
+    if (existingDownloads.length > 0) {
+      return NextResponse.json(
+        { error: "You already own some of these books", bookIds: existingDownloads.map(d => d.bookId) },
+        { status: 400 }
+      )
+    }
+
+    const total = books.reduce((sum: number, book: any) => sum + Number(book.price), 0)
+    const isFree = total === 0
+
+    const orderId = `FREE-${Date.now()}` // Temporary reference for free orders
+
+    // If free, create order as PAID, grant downloads immediately and return success URL
     if (isFree) {
+      const order = await prisma.order.create({
+        data: {
+          userId: session.user.id!,
+          totalAmount: total,
+          status: "PAID",
+          items: {
+            create: books.map((book: any) => ({
+              bookId: book.id,
+              price: book.price
+            }))
+          }
+        }
+      })
       await prisma.download.createMany({
         data: books.map((book: any) => ({
           userId: session.user.id!,
@@ -58,6 +76,7 @@ export async function POST(req: Request) {
 
     // Create IntaSend invoice/checkout for paid orders
     try {
+      // First try to initiate payment with IntaSend
       const checkout = await intasend.collection().charge({
         first_name: session.user.name?.split(' ')[0] || 'User',
         last_name: session.user.name?.split(' ')[1] || 'Name',
@@ -65,14 +84,24 @@ export async function POST(req: Request) {
         phone_number: phoneNumber,
         amount: total,
         currency: 'KES',
-        api_ref: order.id,
-        redirect_url: `${process.env.NEXTAUTH_URL}/checkout/success?orderId=${order.id}`,
+        api_ref: `TEMP-${Date.now()}`, // Temporary reference
+        redirect_url: `${process.env.NEXTAUTH_URL}/checkout/success`,
       })
 
-      // Update order with IntaSend reference
-      await prisma.order.update({
-        where: { id: order.id },
-        data: { intasendRef: checkout.id }
+      // If successful, create the order in pending state
+      const order = await prisma.order.create({
+        data: {
+          userId: session.user.id!,
+          totalAmount: total,
+          status: "PENDING",
+          intasendRef: checkout.id,
+          items: {
+            create: books.map((book: any) => ({
+              bookId: book.id,
+              price: book.price
+            }))
+          }
+        }
       })
 
       return NextResponse.json({ 

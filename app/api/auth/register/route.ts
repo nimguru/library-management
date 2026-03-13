@@ -34,7 +34,7 @@ export async function POST(req: Request) {
     return NextResponse.json(userWithoutPassword, { status: 201 })
   } catch (error) {
     if (error instanceof Error && error.name === "ZodError") {
-      // @ts-ignore
+      
       return NextResponse.json({ error: error.errors[0].message }, { status: 400 })
     }
     console.error("Registration Error:", error)

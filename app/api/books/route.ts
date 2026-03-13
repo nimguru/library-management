@@ -9,6 +9,9 @@ export async function GET(req: Request) {
     const query = searchParams.get("q")
     const genre = searchParams.get("genre")
 
+    const page = Number(searchParams.get("page") || 1)
+    const limit = Number(searchParams.get("limit") || 20)
+
     const books = await prisma.book.findMany({
       where: {
         AND: [
@@ -21,7 +24,15 @@ export async function GET(req: Request) {
           genre ? { genres: { has: genre } } : {},
         ]
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      skip: (page - 1) * limit,
+      select: {
+        id: true, title: true, author: true, isbn: true,
+        genres: true, description: true, coverUrl: true,
+        price: true, isFree: true, publishedYear: true,
+        pageCount: true, language: true, createdAt: true,
+      }
     })
 
     return NextResponse.json(books)
@@ -33,7 +44,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const session = await auth()
-    // @ts-ignore
+    
     if (session?.user?.role !== "ADMIN") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
