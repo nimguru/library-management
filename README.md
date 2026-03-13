@@ -68,7 +68,7 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 
 ## 📄 License
 
-This project is private and intended for internal use.
+This project is public and free to use. special thanks to [Elvinoacer](https://github.com/Elvinoacer) for the contribution.
 
 ---
 
