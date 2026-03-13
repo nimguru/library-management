@@ -12,7 +12,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Search, MoreHorizontal, Eye, Ban, Shield, User } from "lucide-react"
+import { Search, MoreHorizontal, Eye, Ban, Shield, User, Loader2 } from "lucide-react"
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 
 interface UserData {
   id: string
@@ -26,77 +28,46 @@ interface UserData {
 }
 
 // Mock data
-const users: UserData[] = [
-  {
-    id: "1",
-    name: "John Doe",
-    email: "john@example.com",
-    role: "MEMBER",
-    joinedDate: "Jan 15, 2024",
-    orders: 5,
-    totalSpent: 12500,
-    status: "active",
-  },
-  {
-    id: "2",
-    name: "Jane Smith",
-    email: "jane@example.com",
-    role: "MEMBER",
-    joinedDate: "Jan 20, 2024",
-    orders: 3,
-    totalSpent: 4800,
-    status: "active",
-  },
-  {
-    id: "3",
-    name: "Admin User",
-    email: "admin@kitabu.com",
-    role: "ADMIN",
-    joinedDate: "Dec 1, 2023",
-    orders: 0,
-    totalSpent: 0,
-    status: "active",
-  },
-  {
-    id: "4",
-    name: "Mike Johnson",
-    email: "mike@example.com",
-    role: "MEMBER",
-    joinedDate: "Feb 5, 2024",
-    orders: 8,
-    totalSpent: 18200,
-    status: "active",
-  },
-  {
-    id: "5",
-    name: "Sarah Brown",
-    email: "sarah@example.com",
-    role: "MEMBER",
-    joinedDate: "Feb 10, 2024",
-    orders: 2,
-    totalSpent: 0,
-    status: "suspended",
-  },
-  {
-    id: "6",
-    name: "David Wilson",
-    email: "david@example.com",
-    role: "MEMBER",
-    joinedDate: "Feb 12, 2024",
-    orders: 1,
-    totalSpent: 1500,
-    status: "active",
-  },
-]
 
 export default function AdminUsersPage() {
   const [searchQuery, setSearchQuery] = useState("")
+  const [roleFilter, setRoleFilter] = useState("ALL")
+  const queryClient = useQueryClient()
 
-  const filteredUsers = users.filter(
-    (user) =>
-      user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      user.email.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  const { data: users = [], isLoading, isError } = useQuery<any[]>({
+    queryKey: ['admin-users', searchQuery, roleFilter],
+    queryFn: async () => {
+      const params = new URLSearchParams()
+      if (searchQuery) params.set('q', searchQuery)
+      const res = await fetch(`/api/admin/users?${params.toString()}`)
+      if (!res.ok) throw new Error("Failed to fetch users")
+      return res.json()
+    }
+  })
+
+  const updateRoleMutation = useMutation({
+    mutationFn: async ({ userId, role }: { userId: string, role: string }) => {
+      const res = await fetch(`/api/admin/users`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, role })
+      })
+      if (!res.ok) throw new Error("Failed to update user role")
+      return res.json()
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-users'] })
+      toast.success("User role updated")
+    },
+    onError: (error: any) => {
+      toast.error(error.message)
+    }
+  })
+
+  const filteredUsers = users.filter((user: any) => {
+    if (roleFilter !== "ALL" && user.role !== roleFilter) return false
+    return true
+  })
 
   return (
     <div className="flex min-h-screen">
@@ -127,13 +98,25 @@ export default function AdminUsersPage() {
                 />
               </div>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm">
+                <Button 
+                  variant={roleFilter === "ALL" ? "outline" : "ghost"} 
+                  size="sm"
+                  onClick={() => setRoleFilter("ALL")}
+                >
                   All
                 </Button>
-                <Button variant="ghost" size="sm">
+                <Button 
+                  variant={roleFilter === "MEMBER" ? "outline" : "ghost"} 
+                  size="sm"
+                  onClick={() => setRoleFilter("MEMBER")}
+                >
                   Members
                 </Button>
-                <Button variant="ghost" size="sm">
+                <Button 
+                  variant={roleFilter === "ADMIN" ? "outline" : "ghost"} 
+                  size="sm"
+                  onClick={() => setRoleFilter("ADMIN")}
+                >
                   Admins
                 </Button>
               </div>
@@ -169,89 +152,112 @@ export default function AdminUsersPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border bg-card">
-                    {filteredUsers.map((user) => (
-                      <tr key={user.id} className="hover:bg-secondary/50">
-                        <td className="px-4 py-4">
-                          <div className="flex items-center gap-3">
-                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-secondary">
-                              <User className="h-5 w-5 text-muted-foreground" />
+                    {isLoading ? (
+                      <tr>
+                        <td colSpan={7} className="py-12 text-center">
+                          <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" />
+                          <p className="mt-2 text-muted-foreground">Loading users...</p>
+                        </td>
+                      </tr>
+                    ) : isError ? (
+                      <tr>
+                        <td colSpan={7} className="py-12 text-center">
+                          <p className="text-destructive font-medium">Failed to load users</p>
+                        </td>
+                      </tr>
+                    ) : filteredUsers.length > 0 ? (
+                      filteredUsers.map((user) => (
+                        <tr key={user.id} className="hover:bg-secondary/50">
+                          <td className="px-4 py-4">
+                            <div className="flex items-center gap-3">
+                              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-secondary">
+                                <User className="h-5 w-5 text-muted-foreground" />
+                              </div>
+                              <div>
+                                <p className="font-medium text-foreground">{user.name}</p>
+                                <p className="text-sm text-muted-foreground">{user.email}</p>
+                              </div>
                             </div>
-                            <div>
-                              <p className="font-medium text-foreground">{user.name}</p>
-                              <p className="text-sm text-muted-foreground">{user.email}</p>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-4 py-4">
-                          <Badge
-                            className={
-                              user.role === "ADMIN"
-                                ? "bg-primary/10 text-primary"
-                                : "bg-secondary text-secondary-foreground"
-                            }
-                          >
-                            {user.role}
-                          </Badge>
-                        </td>
-                        <td className="px-4 py-4">
-                          <span className="text-muted-foreground">{user.joinedDate}</span>
-                        </td>
-                        <td className="px-4 py-4">
-                          <span className="text-muted-foreground">{user.orders}</span>
-                        </td>
-                        <td className="px-4 py-4">
-                          <span className="font-medium text-foreground">
-                            {user.totalSpent === 0
-                              ? "-"
-                              : `KES ${user.totalSpent.toLocaleString()}`}
-                          </span>
-                        </td>
-                        <td className="px-4 py-4">
-                          <Badge
-                            className={
-                              user.status === "active"
-                                ? "bg-primary/10 text-primary"
-                                : "bg-destructive/10 text-destructive"
-                            }
-                          >
-                            {user.status}
-                          </Badge>
-                        </td>
-                        <td className="px-4 py-4 text-right">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon">
-                                <MoreHorizontal className="h-4 w-4" />
-                                <span className="sr-only">Actions</span>
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem className="gap-2">
-                                <Eye className="h-4 w-4" />
-                                View Profile
-                              </DropdownMenuItem>
-                              {user.role === "MEMBER" && (
+                          </td>
+                          <td className="px-4 py-4">
+                            <Badge
+                              className={
+                                user.role === "ADMIN"
+                                  ? "bg-primary/10 text-primary"
+                                  : "bg-secondary text-secondary-foreground"
+                              }
+                            >
+                              {user.role}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-4">
+                            <span className="text-muted-foreground">{user.joinedDate}</span>
+                          </td>
+                          <td className="px-4 py-4">
+                            <span className="text-muted-foreground">{user.purchases || 0}</span>
+                          </td>
+                          <td className="px-4 py-4">
+                            <span className="font-medium text-foreground">
+                              {user.totalSpent ? `KES ${user.totalSpent.toLocaleString()}` : "-"}
+                            </span>
+                          </td>
+                          <td className="px-4 py-4">
+                            <Badge
+                              className={
+                                user.status === "Active"
+                                  ? "bg-primary/10 text-primary"
+                                  : "bg-destructive/10 text-destructive"
+                              }
+                            >
+                              {user.status}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-4 text-right">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon">
+                                  <MoreHorizontal className="h-4 w-4" />
+                                  <span className="sr-only">Actions</span>
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
                                 <DropdownMenuItem className="gap-2">
-                                  <Shield className="h-4 w-4" />
-                                  Make Admin
+                                  <Eye className="h-4 w-4" />
+                                  View Profile
                                 </DropdownMenuItem>
-                              )}
-                              {user.status === "active" ? (
+                                {user.role === "MEMBER" ? (
+                                  <DropdownMenuItem 
+                                    className="gap-2"
+                                    onClick={() => updateRoleMutation.mutate({ userId: user.id, role: "ADMIN" })}
+                                  >
+                                    <Shield className="h-4 w-4" />
+                                    Make Admin
+                                  </DropdownMenuItem>
+                                ) : (
+                                  <DropdownMenuItem 
+                                    className="gap-2"
+                                    onClick={() => updateRoleMutation.mutate({ userId: user.id, role: "MEMBER" })}
+                                  >
+                                    <Shield className="h-4 w-4" />
+                                    Remove Admin
+                                  </DropdownMenuItem>
+                                )}
                                 <DropdownMenuItem className="gap-2 text-destructive">
                                   <Ban className="h-4 w-4" />
                                   Suspend User
                                 </DropdownMenuItem>
-                              ) : (
-                                <DropdownMenuItem className="gap-2 text-primary">
-                                  <Shield className="h-4 w-4" />
-                                  Reactivate
-                                </DropdownMenuItem>
-                              )}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={7} className="py-12 text-center">
+                          <p className="text-muted-foreground">No users found</p>
                         </td>
                       </tr>
-                    ))}
+                    )}
                   </tbody>
                 </table>
               </div>

@@ -8,52 +8,79 @@ import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { ArrowLeft, CreditCard, Smartphone, Shield, Lock } from "lucide-react"
+import { ArrowLeft, CreditCard, Smartphone, Shield, Lock, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useCart } from "@/lib/store/cart"
+import { toast } from "sonner"
+import { useSession } from "next-auth/react"
+import { useRouter } from "next/navigation"
 
 type PaymentMethod = "mpesa" | "card"
 
-interface CartItem {
-  id: string
-  title: string
-  author: string
-  coverUrl: string
-  price: number
-}
-
-// Mock cart data
-const cartItems: CartItem[] = [
-  {
-    id: "1",
-    title: "The Art of Business Strategy",
-    author: "James Kimani",
-    coverUrl: "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=400&h=600&fit=crop",
-    price: 1500,
-  },
-  {
-    id: "2",
-    title: "Modern Web Development",
-    author: "Sarah Ochieng",
-    coverUrl: "https://images.unsplash.com/photo-1515879218367-8466d910aaa4?w=400&h=600&fit=crop",
-    price: 2000,
-  },
-]
 
 export default function CheckoutPage() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("mpesa")
   const [phoneNumber, setPhoneNumber] = useState("")
   const [isProcessing, setIsProcessing] = useState(false)
-
-  const subtotal = cartItems.reduce((sum, item) => sum + item.price, 0)
+  const { data: session, status } = useSession()
+  const router = useRouter()
+  
+  const items = useCart((state) => state.items)
+  const cartItems = items
+  const subtotal = items.reduce((sum, item) => sum + Number(item.price), 0)
   const total = subtotal
 
   const handleCheckout = async () => {
+    if (!session) {
+      toast.error("Please sign in to complete your purchase")
+      router.push("/login?callbackUrl=/checkout")
+      return
+    }
+
+    if (items.length === 0) {
+      toast.error("Your cart is empty")
+      return
+    }
+
     setIsProcessing(true)
-    // Simulate payment processing
-    await new Promise((resolve) => setTimeout(resolve, 2000))
-    setIsProcessing(false)
-    // In production, this would redirect to IntaSend checkout
-    alert("Payment initiated! In production, this would redirect to IntaSend.")
+    
+    try {
+      const response = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          bookIds: items.map(item => item.id) 
+        }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to initiate payment")
+      }
+
+      // Redirect to IntaSend checkout URL
+      if (data.url) {
+        window.location.href = data.url
+      } else {
+        throw new Error("Invalid response from payment gateway")
+      }
+    } catch (error: any) {
+      toast.error(error.message || "An unexpected error occurred")
+      setIsProcessing(false)
+    }
+  }
+
+  if (status === "loading") {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <Header />
+        <div className="flex flex-1 items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+        <Footer />
+      </div>
+    )
   }
 
   return (
@@ -220,7 +247,7 @@ export default function CheckoutPage() {
                     <div key={item.id} className="flex gap-4">
                       <div className="relative h-20 w-16 shrink-0 overflow-hidden rounded-md bg-secondary">
                         <Image
-                          src={item.coverUrl}
+                          src={item.coverUrl || "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=400&h=600&fit=crop"}
                           alt={item.title}
                           fill
                           className="object-cover"

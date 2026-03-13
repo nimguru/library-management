@@ -1,0 +1,97 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id           String     @id @default(cuid())
+  name         String
+  email        String     @unique
+  passwordHash String
+  role         Role       @default(MEMBER)
+  createdAt    DateTime   @default(now())
+  orders       Order[]
+  downloads    Download[]
+  reviews      Review[]
+}
+
+model Book {
+  id            String      @id @default(cuid())
+  title         String
+  author        String
+  isbn          String?     @unique
+  genres        String[]
+  description   String
+  coverUrl      String?
+  fileKey       String      // R2 object key (never expose this directly)
+  price         Decimal     @db.Decimal(10,2)
+  isFree        Boolean     @default(false)
+  publishedYear Int?
+  pageCount     Int?
+  language      String      @default("en")
+  createdAt     DateTime    @default(now())
+  orderItems    OrderItem[]
+  downloads     Download[]
+  reviews       Review[]
+}
+
+model Order {
+  id          String      @id @default(cuid())
+  userId      String
+  user        User        @relation(fields: [userId], references: [id])
+  status      OrderStatus @default(PENDING)
+  totalAmount Decimal     @db.Decimal(10,2)
+  currency    String      @default("KES")
+  intasendRef String?     // IntaSend invoice ID
+  createdAt   DateTime    @default(now())
+  items       OrderItem[]
+}
+
+model OrderItem {
+  id      String  @id @default(cuid())
+  orderId String
+  order   Order   @relation(fields: [orderId], references: [id])
+  bookId  String
+  book    Book    @relation(fields: [bookId], references: [id])
+  price   Decimal @db.Decimal(10,2)
+}
+
+model Download {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  bookId    String
+  book      Book      @relation(fields: [bookId], references: [id])
+  grantedAt DateTime  @default(now())
+  expiresAt DateTime? // null = lifetime access
+
+  @@unique([userId, bookId])
+}
+
+model Review {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  bookId    String
+  book      Book     @relation(fields: [bookId], references: [id])
+  rating    Int      // 1–5
+  comment   String?
+  createdAt DateTime @default(now())
+
+  @@unique([userId, bookId])
+}
+
+enum Role {
+  MEMBER
+  ADMIN
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}

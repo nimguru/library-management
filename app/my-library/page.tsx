@@ -8,71 +8,56 @@ import { DashboardHeader } from "@/components/dashboard/header"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Download, BookOpen, Search, Grid3X3, List } from "lucide-react"
+import { Download, BookOpen, Search, Grid3X3, List, Loader2 } from "lucide-react"
+import { useQuery } from "@tanstack/react-query"
+import { toast } from "sonner"
+import { useSession } from "next-auth/react"
+import { useRouter } from "next/navigation"
 
-interface PurchasedBook {
-  id: string
-  title: string
-  author: string
-  coverUrl: string
-  purchasedAt: string
-  fileFormat: string
-  genres: string[]
-}
-
-// Mock data for purchased books
-const purchasedBooks: PurchasedBook[] = [
-  {
-    id: "1",
-    title: "The Art of Business Strategy",
-    author: "James Kimani",
-    coverUrl: "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=400&h=600&fit=crop",
-    purchasedAt: "February 20, 2024",
-    fileFormat: "PDF, EPUB",
-    genres: ["Business", "Strategy"],
-  },
-  {
-    id: "2",
-    title: "Modern Web Development",
-    author: "Sarah Ochieng",
-    coverUrl: "https://images.unsplash.com/photo-1515879218367-8466d910aaa4?w=400&h=600&fit=crop",
-    purchasedAt: "February 18, 2024",
-    fileFormat: "PDF, EPUB",
-    genres: ["Technology", "Programming"],
-  },
-  {
-    id: "3",
-    title: "Mindful Leadership",
-    author: "David Mwangi",
-    coverUrl: "https://images.unsplash.com/photo-1456324504439-367cee3b3c32?w=400&h=600&fit=crop",
-    purchasedAt: "February 15, 2024",
-    fileFormat: "PDF",
-    genres: ["Self-Help", "Leadership"],
-  },
-  {
-    id: "4",
-    title: "Introduction to AI",
-    author: "Kevin Otieno",
-    coverUrl: "https://images.unsplash.com/photo-1485827404703-89b55fcc595e?w=400&h=600&fit=crop",
-    purchasedAt: "February 10, 2024",
-    fileFormat: "PDF, EPUB",
-    genres: ["Technology", "AI"],
-  },
-]
 
 export default function MyLibraryPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid")
+  const { data: session, status } = useSession()
+  const router = useRouter()
 
-  const filteredBooks = purchasedBooks.filter(
-    (book) =>
+  const { data: books = [], isLoading, isError } = useQuery<any[]>({
+    queryKey: ['purchased-books', searchQuery],
+    enabled: !!session,
+    queryFn: async () => {
+      const res = await fetch(`/api/books?purchased=true`)
+      if (!res.ok) throw new Error("Failed to fetch library")
+      return res.json()
+    }
+  })
+
+  const filteredBooks = books.filter(
+    (book: any) =>
       book.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       book.author.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
-  const handleDownload = (book: PurchasedBook) => {
-    console.log("Downloading:", book.title)
-    // In production, this would call the signed URL API
+  const handleDownload = async (book: any) => {
+    try {
+      toast.info("Preparing your download...")
+      const res = await fetch(`/api/books/${book.id}`)
+      const data = await res.json()
+      
+      if (!res.ok) throw new Error(data.error || "Failed to get download link")
+      
+      if (data.downloadUrl) {
+        window.open(data.downloadUrl, '_blank')
+      } else {
+        throw new Error("Download link not available")
+      }
+    } catch (error: any) {
+      toast.error(error.message)
+    }
+  }
+
+  if (status === "unauthenticated") {
+    router.push("/login")
+    return null
   }
 
   return (
@@ -88,7 +73,7 @@ export default function MyLibraryPage() {
                   My Library
                 </h1>
                 <p className="mt-1 text-muted-foreground">
-                  {purchasedBooks.length} books in your collection
+                  {books.length} books in your collection
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -125,7 +110,19 @@ export default function MyLibraryPage() {
               </div>
             </div>
 
-            {filteredBooks.length > 0 ? (
+            {isLoading ? (
+              <div className="flex flex-col items-center justify-center py-24">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                <p className="mt-4 text-muted-foreground">Loading your library...</p>
+              </div>
+            ) : isError ? (
+              <div className="flex flex-col items-center justify-center py-24 text-center">
+                <p className="text-lg font-medium text-destructive">Failed to load library</p>
+                <Button variant="outline" className="mt-4" onClick={() => window.location.reload()}>
+                  Try Again
+                </Button>
+              </div>
+            ) : filteredBooks.length > 0 ? (
               viewMode === "grid" ? (
                 <div className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                   {filteredBooks.map((book) => (
@@ -146,7 +143,7 @@ export default function MyLibraryPage() {
                       </Link>
                       <div className="p-4">
                         <div className="flex flex-wrap gap-1">
-                          {book.genres.slice(0, 2).map((genre) => (
+                          {book.genres.slice(0, 2).map((genre: string) => (
                             <Badge key={genre} variant="secondary" className="text-xs">
                               {genre}
                             </Badge>
@@ -196,7 +193,7 @@ export default function MyLibraryPage() {
                       </Link>
                       <div className="flex flex-1 flex-col">
                         <div className="flex flex-wrap gap-1">
-                          {book.genres.map((genre) => (
+                          {book.genres.map((genre: string) => (
                             <Badge key={genre} variant="secondary" className="text-xs">
                               {genre}
                             </Badge>
@@ -210,7 +207,7 @@ export default function MyLibraryPage() {
                         <p className="text-sm text-muted-foreground">{book.author}</p>
                         <div className="mt-auto flex items-center justify-between pt-2">
                           <p className="text-sm text-muted-foreground">
-                            Purchased on {book.purchasedAt}
+                            Purchased recently
                           </p>
                           <div className="flex gap-2">
                             <Button

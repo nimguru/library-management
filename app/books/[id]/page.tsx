@@ -18,63 +18,65 @@ import {
   Check,
 } from "lucide-react"
 import { FeaturedBooks } from "@/components/books/featured-books"
+import { useQuery } from "@tanstack/react-query"
+import { useCart } from "@/lib/store/cart"
+import { toast } from "sonner"
+import { Loader2 } from "lucide-react"
 
-// Mock book data - in production this would come from the database
-const bookData = {
-  id: "1",
-  title: "The Art of Business Strategy",
-  author: "James Kimani",
-  coverUrl: "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=800&h=1200&fit=crop",
-  price: 1500,
-  isFree: false,
-  genres: ["Business", "Strategy", "Leadership"],
-  rating: 4.8,
-  reviewCount: 124,
-  description: `Master the art of strategic thinking and business planning with this comprehensive guide. Written by renowned business consultant James Kimani, this book provides actionable insights and real-world case studies from successful East African businesses.
-
-Learn how to analyze market opportunities, develop competitive advantages, and execute strategies that drive sustainable growth. Whether you're a startup founder, corporate executive, or aspiring entrepreneur, this book will transform how you approach business challenges.
-
-Key topics covered include market analysis, competitive positioning, strategic planning frameworks, execution excellence, and measuring success. Each chapter includes practical exercises and templates you can apply immediately to your business.`,
-  publishedYear: 2024,
-  pageCount: 342,
-  language: "English",
-  isbn: "978-9966-000-001",
-  fileFormat: "PDF, EPUB",
-}
-
-const reviews = [
-  {
-    id: "1",
-    userName: "Mary Wangari",
-    rating: 5,
-    date: "February 15, 2024",
-    comment:
-      "Excellent book! The frameworks presented are practical and easy to apply. Highly recommend for anyone in business.",
-  },
-  {
-    id: "2",
-    userName: "John Odhiambo",
-    rating: 4,
-    date: "February 10, 2024",
-    comment:
-      "Great insights into strategic thinking. The East African case studies make it very relatable. Would have liked more on digital strategy.",
-  },
-  {
-    id: "3",
-    userName: "Alice Njeri",
-    rating: 5,
-    date: "January 28, 2024",
-    comment:
-      "This book changed how I approach business planning. The chapter on competitive analysis is worth the price alone.",
-  },
-]
 
 export default function BookDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const [isWishlisted, setIsWishlisted] = useState(false)
+  const { data: book, isLoading, isError } = useQuery<any>({
+    queryKey: ['book', id],
+    queryFn: async () => {
+      const res = await fetch(`/api/books/${id}`)
+      if (!res.ok) throw new Error("Book not found")
+      return res.json()
+    }
+  })
 
-  // In production, fetch book data based on ID
-  const book = bookData
+  const addItem = useCart((state) => state.addItem)
+
+  const handleAddToCart = () => {
+    if (!book) return
+    addItem({
+      id: book.id,
+      title: book.title,
+      author: book.author,
+      price: Number(book.price),
+      coverUrl: book.coverUrl
+    })
+    toast.success(`${book.title} added to cart`)
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <Header />
+        <div className="flex flex-1 items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+        <Footer />
+      </div>
+    )
+  }
+
+  if (isError || !book) {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <Header />
+        <div className="flex flex-1 flex-col items-center justify-center text-center">
+          <h1 className="text-2xl font-bold">Book Not Found</h1>
+          <p className="mt-2 text-muted-foreground">The book you're looking for doesn't exist.</p>
+          <Link href="/books" className="mt-4">
+            <Button>Back to Store</Button>
+          </Link>
+        </div>
+        <Footer />
+      </div>
+    )
+  }
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -99,7 +101,7 @@ export default function BookDetailPage({ params }: { params: Promise<{ id: strin
             {/* Cover Image */}
             <div className="relative aspect-[3/4] overflow-hidden rounded-xl bg-secondary lg:sticky lg:top-24 lg:self-start">
               <Image
-                src={book.coverUrl}
+                src={book.coverUrl || "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=800&h=1200&fit=crop"}
                 alt={book.title}
                 fill
                 className="object-cover"
@@ -116,7 +118,7 @@ export default function BookDetailPage({ params }: { params: Promise<{ id: strin
             <div className="flex flex-col gap-6">
               {/* Genres */}
               <div className="flex flex-wrap gap-2">
-                {book.genres.map((genre) => (
+                {book.genres?.map((genre: string) => (
                   <Badge key={genre} variant="secondary">
                     {genre}
                   </Badge>
@@ -131,23 +133,23 @@ export default function BookDetailPage({ params }: { params: Promise<{ id: strin
                 <p className="mt-2 text-lg text-muted-foreground">by {book.author}</p>
               </div>
 
-              {/* Rating */}
+              {/* Rating (Static for now as Review model is separate) */}
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-1">
                   {[1, 2, 3, 4, 5].map((star) => (
                     <Star
                       key={star}
                       className={`h-5 w-5 ${
-                        star <= Math.floor(book.rating)
+                        star <= 4
                           ? "fill-primary text-primary"
                           : "text-muted-foreground"
                       }`}
                     />
                   ))}
                 </div>
-                <span className="font-medium text-foreground">{book.rating}</span>
+                <span className="font-medium text-foreground">4.5</span>
                 <span className="text-muted-foreground">
-                  ({book.reviewCount} reviews)
+                  (12 reviews)
                 </span>
               </div>
 
@@ -155,12 +157,12 @@ export default function BookDetailPage({ params }: { params: Promise<{ id: strin
               <div className="flex flex-col gap-4 rounded-lg border border-border bg-card p-6">
                 <div className="flex items-baseline gap-2">
                   <span className="text-3xl font-bold text-foreground">
-                    {book.isFree ? "Free" : `KES ${book.price.toLocaleString()}`}
+                    {book.isFree ? "Free" : `KES ${Number(book.price).toLocaleString()}`}
                   </span>
                 </div>
 
                 <div className="flex flex-col gap-3">
-                  <Button size="lg" className="gap-2">
+                  <Button size="lg" className="gap-2" onClick={handleAddToCart}>
                     <ShoppingCart className="h-5 w-5" />
                     Add to Cart
                   </Button>
@@ -216,7 +218,7 @@ export default function BookDetailPage({ params }: { params: Promise<{ id: strin
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Format</p>
-                  <p className="font-medium text-foreground">{book.fileFormat}</p>
+                  <p className="font-medium text-foreground">PDF, EPUB</p>
                 </div>
               </div>
 
@@ -226,7 +228,7 @@ export default function BookDetailPage({ params }: { params: Promise<{ id: strin
                   About this book
                 </h2>
                 <div className="prose prose-invert max-w-none">
-                  {book.description.split("\n\n").map((paragraph, index) => (
+                  {book.description?.split("\n\n").map((paragraph: string, index: number) => (
                     <p key={index} className="mb-4 text-muted-foreground leading-relaxed">
                       {paragraph}
                     </p>
@@ -237,35 +239,10 @@ export default function BookDetailPage({ params }: { params: Promise<{ id: strin
               {/* Reviews Section */}
               <div>
                 <h2 className="mb-4 text-xl font-semibold text-foreground">
-                  Reviews ({reviews.length})
+                  Reviews (0)
                 </h2>
                 <div className="flex flex-col gap-4">
-                  {reviews.map((review) => (
-                    <div
-                      key={review.id}
-                      className="rounded-lg border border-border bg-card p-4"
-                    >
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <p className="font-medium text-foreground">{review.userName}</p>
-                          <p className="text-sm text-muted-foreground">{review.date}</p>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          {[1, 2, 3, 4, 5].map((star) => (
-                            <Star
-                              key={star}
-                              className={`h-4 w-4 ${
-                                star <= review.rating
-                                  ? "fill-primary text-primary"
-                                  : "text-muted-foreground"
-                              }`}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                      <p className="mt-3 text-muted-foreground">{review.comment}</p>
-                    </div>
-                  ))}
+                  <p className="text-muted-foreground italic">No reviews yet. Be the first to review!</p>
                 </div>
               </div>
             </div>

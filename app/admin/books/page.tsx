@@ -13,7 +13,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Plus, Search, MoreHorizontal, Pencil, Trash2, Eye } from "lucide-react"
+import { Plus, Search, MoreHorizontal, Pencil, Trash2, Eye, Loader2 } from "lucide-react"
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 
 interface Book {
   id: string
@@ -27,73 +29,38 @@ interface Book {
   sales: number
 }
 
-// Mock data
-const books: Book[] = [
-  {
-    id: "1",
-    title: "The Art of Business Strategy",
-    author: "James Kimani",
-    coverUrl: "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=400&h=600&fit=crop",
-    price: 1500,
-    isFree: false,
-    genres: ["Business", "Strategy"],
-    status: "published",
-    sales: 234,
-  },
-  {
-    id: "2",
-    title: "Modern Web Development",
-    author: "Sarah Ochieng",
-    coverUrl: "https://images.unsplash.com/photo-1515879218367-8466d910aaa4?w=400&h=600&fit=crop",
-    price: 2000,
-    isFree: false,
-    genres: ["Technology"],
-    status: "published",
-    sales: 189,
-  },
-  {
-    id: "3",
-    title: "Mindful Leadership",
-    author: "David Mwangi",
-    coverUrl: "https://images.unsplash.com/photo-1456324504439-367cee3b3c32?w=400&h=600&fit=crop",
-    price: 0,
-    isFree: true,
-    genres: ["Self-Help"],
-    status: "published",
-    sales: 128,
-  },
-  {
-    id: "4",
-    title: "African Tales & Legends",
-    author: "Wanjiku Ngugi",
-    coverUrl: "https://images.unsplash.com/photo-1481627834876-b7833e8f5570?w=400&h=600&fit=crop",
-    price: 800,
-    isFree: false,
-    genres: ["Fiction"],
-    status: "draft",
-    sales: 0,
-  },
-  {
-    id: "5",
-    title: "Introduction to AI",
-    author: "Kevin Otieno",
-    coverUrl: "https://images.unsplash.com/photo-1485827404703-89b55fcc595e?w=400&h=600&fit=crop",
-    price: 0,
-    isFree: true,
-    genres: ["Technology", "AI"],
-    status: "published",
-    sales: 445,
-  },
-]
 
 export default function AdminBooksPage() {
   const [searchQuery, setSearchQuery] = useState("")
+  const queryClient = useQueryClient()
 
-  const filteredBooks = books.filter(
-    (book) =>
-      book.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      book.author.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  const { data: books = [], isLoading, isError } = useQuery<any[]>({
+    queryKey: ['admin-books', searchQuery],
+    queryFn: async () => {
+      const params = new URLSearchParams()
+      if (searchQuery) params.set('q', searchQuery)
+      const res = await fetch(`/api/books?${params.toString()}`)
+      if (!res.ok) throw new Error("Failed to fetch books")
+      return res.json()
+    }
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/books/${id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error("Failed to delete book")
+      return res.json()
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-books'] })
+      toast.success("Book deleted successfully")
+    },
+    onError: (error: any) => {
+      toast.error(error.message)
+    }
+  })
+
+  const filteredBooks = books
 
   return (
     <div className="flex min-h-screen">
@@ -156,78 +123,106 @@ export default function AdminBooksPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border bg-card">
-                    {filteredBooks.map((book) => (
-                      <tr key={book.id} className="hover:bg-secondary/50">
-                        <td className="px-4 py-4">
-                          <div className="flex items-center gap-3">
-                            <div className="relative h-16 w-12 shrink-0 overflow-hidden rounded bg-secondary">
-                              <Image
-                                src={book.coverUrl}
-                                alt={book.title}
-                                fill
-                                className="object-cover"
-                              />
-                            </div>
-                            <div>
-                              <p className="font-medium text-foreground">{book.title}</p>
-                              <p className="text-sm text-muted-foreground">{book.author}</p>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-4 py-4">
-                          <div className="flex flex-wrap gap-1">
-                            {book.genres.map((genre) => (
-                              <Badge key={genre} variant="secondary" className="text-xs">
-                                {genre}
-                              </Badge>
-                            ))}
-                          </div>
-                        </td>
-                        <td className="px-4 py-4">
-                          <span className="text-foreground">
-                            {book.isFree ? "Free" : `KES ${book.price.toLocaleString()}`}
-                          </span>
-                        </td>
-                        <td className="px-4 py-4">
-                          <Badge
-                            className={
-                              book.status === "published"
-                                ? "bg-primary/10 text-primary"
-                                : "bg-yellow-500/10 text-yellow-500"
-                            }
-                          >
-                            {book.status}
-                          </Badge>
-                        </td>
-                        <td className="px-4 py-4">
-                          <span className="text-muted-foreground">{book.sales}</span>
-                        </td>
-                        <td className="px-4 py-4 text-right">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon">
-                                <MoreHorizontal className="h-4 w-4" />
-                                <span className="sr-only">Actions</span>
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem className="gap-2">
-                                <Eye className="h-4 w-4" />
-                                View
-                              </DropdownMenuItem>
-                              <DropdownMenuItem className="gap-2">
-                                <Pencil className="h-4 w-4" />
-                                Edit
-                              </DropdownMenuItem>
-                              <DropdownMenuItem className="gap-2 text-destructive">
-                                <Trash2 className="h-4 w-4" />
-                                Delete
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                    {isLoading ? (
+                      <tr>
+                        <td colSpan={6} className="py-12 text-center">
+                          <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" />
+                          <p className="mt-2 text-muted-foreground">Loading books...</p>
                         </td>
                       </tr>
-                    ))}
+                    ) : isError ? (
+                      <tr>
+                        <td colSpan={6} className="py-12 text-center">
+                          <p className="text-destructive font-medium">Failed to load books</p>
+                        </td>
+                      </tr>
+                    ) : filteredBooks.length > 0 ? (
+                      filteredBooks.map((book) => (
+                        <tr key={book.id} className="hover:bg-secondary/50">
+                          <td className="px-4 py-4">
+                            <div className="flex items-center gap-3">
+                              <div className="relative h-16 w-12 shrink-0 overflow-hidden rounded bg-secondary">
+                                <Image
+                                  src={book.coverUrl || "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=400&h=600&fit=crop"}
+                                  alt={book.title}
+                                  fill
+                                  className="object-cover"
+                                />
+                              </div>
+                              <div>
+                                <p className="font-medium text-foreground">{book.title}</p>
+                                <p className="text-sm text-muted-foreground">{book.author}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-4">
+                            <div className="flex flex-wrap gap-1">
+                              {book.genres?.map((genre: string) => (
+                                <Badge key={genre} variant="secondary" className="text-xs">
+                                  {genre}
+                                </Badge>
+                              ))}
+                            </div>
+                          </td>
+                          <td className="px-4 py-4">
+                            <span className="text-foreground">
+                              {book.isFree ? "Free" : `KES ${Number(book.price).toLocaleString()}`}
+                            </span>
+                          </td>
+                          <td className="px-4 py-4">
+                            <Badge
+                              className={
+                                book.status === "published" || !book.status
+                                  ? "bg-primary/10 text-primary"
+                                  : "bg-yellow-500/10 text-yellow-500"
+                              }
+                            >
+                              {book.status || "published"}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-4">
+                            <span className="text-muted-foreground">{book._count?.orders || 0}</span>
+                          </td>
+                          <td className="px-4 py-4 text-right">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon">
+                                  <MoreHorizontal className="h-4 w-4" />
+                                  <span className="sr-only">Actions</span>
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <Link href={`/books/${book.id}`}>
+                                  <DropdownMenuItem className="gap-2">
+                                    <Eye className="h-4 w-4" />
+                                    View
+                                  </DropdownMenuItem>
+                                </Link>
+                                <DropdownMenuItem className="gap-2">
+                                  <Pencil className="h-4 w-4" />
+                                  Edit
+                                </DropdownMenuItem>
+                                <DropdownMenuItem 
+                                  className="gap-2 text-destructive"
+                                  onClick={() => {
+                                    if(confirm("Are you sure?")) deleteMutation.mutate(book.id)
+                                  }}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                  Delete
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={6} className="py-12 text-center">
+                          <p className="text-muted-foreground">No books found</p>
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>

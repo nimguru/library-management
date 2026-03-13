@@ -4,6 +4,8 @@ import Link from "next/link"
 import { Book, ShoppingCart, User, Menu, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useState } from "react"
+import { useCart } from "@/lib/store/cart"
+import { useSession, signOut } from "next-auth/react"
 
 const navItems = [
   { label: "Browse", href: "/books" },
@@ -14,6 +16,9 @@ const navItems = [
 
 export function Header() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const items = useCart((state) => state.items)
+  const cartCount = items.length
+  const { data: session } = useSession()
 
   return (
     <header className="sticky top-0 z-50 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -46,9 +51,11 @@ export function Header() {
               <ShoppingCart className="h-5 w-5" />
               <span className="sr-only">Shopping cart</span>
             </Button>
-            <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">
-              2
-            </span>
+            {cartCount > 0 && (
+              <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">
+                {cartCount}
+              </span>
+            )}
           </Link>
           <Link href="/my-library" className="hidden sm:block">
             <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground">
@@ -56,14 +63,27 @@ export function Header() {
               <span className="sr-only">My account</span>
             </Button>
           </Link>
-          <Link href="/login" className="hidden sm:block">
-            <Button variant="outline" size="sm">
-              Sign In
-            </Button>
-          </Link>
-          <Link href="/register" className="hidden sm:block">
-            <Button size="sm">Get Started</Button>
-          </Link>
+          {session ? (
+            <div className="hidden items-center gap-2 sm:flex">
+              <Link href="/my-library">
+                <Button variant="ghost" size="sm">Dashboard</Button>
+              </Link>
+              <Button variant="outline" size="sm" onClick={() => signOut()}>
+                Sign Out
+              </Button>
+            </div>
+          ) : (
+            <>
+              <Link href="/login" className="hidden sm:block">
+                <Button variant="outline" size="sm">
+                  Sign In
+                </Button>
+              </Link>
+              <Link href="/register" className="hidden sm:block">
+                <Button size="sm">Get Started</Button>
+              </Link>
+            </>
+          )}
 
           {/* Mobile menu button */}
           <Button

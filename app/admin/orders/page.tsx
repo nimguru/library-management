@@ -12,7 +12,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Search, MoreHorizontal, Eye, RefreshCw } from "lucide-react"
+import { Search, MoreHorizontal, Eye, RefreshCw, Loader2 } from "lucide-react"
+import { useQuery } from "@tanstack/react-query"
+import Link from "next/link"
 
 interface Order {
   id: string
@@ -26,75 +28,6 @@ interface Order {
   paymentMethod: string
 }
 
-// Mock data
-const orders: Order[] = [
-  {
-    id: "1",
-    orderNumber: "ORD-2024-001",
-    customer: "John Doe",
-    email: "john@example.com",
-    date: "Feb 20, 2024",
-    status: "PAID",
-    total: 3500,
-    items: 2,
-    paymentMethod: "M-Pesa",
-  },
-  {
-    id: "2",
-    orderNumber: "ORD-2024-002",
-    customer: "Jane Smith",
-    email: "jane@example.com",
-    date: "Feb 19, 2024",
-    status: "PAID",
-    total: 1200,
-    items: 1,
-    paymentMethod: "Card",
-  },
-  {
-    id: "3",
-    orderNumber: "ORD-2024-003",
-    customer: "Mike Johnson",
-    email: "mike@example.com",
-    date: "Feb 18, 2024",
-    status: "PENDING",
-    total: 2800,
-    items: 3,
-    paymentMethod: "M-Pesa",
-  },
-  {
-    id: "4",
-    orderNumber: "ORD-2024-004",
-    customer: "Sarah Brown",
-    email: "sarah@example.com",
-    date: "Feb 17, 2024",
-    status: "PAID",
-    total: 0,
-    items: 1,
-    paymentMethod: "Free",
-  },
-  {
-    id: "5",
-    orderNumber: "ORD-2024-005",
-    customer: "David Wilson",
-    email: "david@example.com",
-    date: "Feb 16, 2024",
-    status: "REFUNDED",
-    total: 1500,
-    items: 1,
-    paymentMethod: "Card",
-  },
-  {
-    id: "6",
-    orderNumber: "ORD-2024-006",
-    customer: "Emily Davis",
-    email: "emily@example.com",
-    date: "Feb 15, 2024",
-    status: "FAILED",
-    total: 4200,
-    items: 2,
-    paymentMethod: "M-Pesa",
-  },
-]
 
 const statusColors = {
   PAID: "bg-primary/10 text-primary",
@@ -105,13 +38,21 @@ const statusColors = {
 
 export default function AdminOrdersPage() {
   const [searchQuery, setSearchQuery] = useState("")
+  const [statusFilter, setStatusFilter] = useState("ALL")
 
-  const filteredOrders = orders.filter(
-    (order) =>
-      order.orderNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      order.customer.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      order.email.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  const { data: orders = [], isLoading, isError } = useQuery<any[]>({
+    queryKey: ['admin-orders', searchQuery, statusFilter],
+    queryFn: async () => {
+      const params = new URLSearchParams()
+      if (searchQuery) params.set('q', searchQuery)
+      if (statusFilter !== "ALL") params.set('status', statusFilter)
+      const res = await fetch(`/api/admin/orders?${params.toString()}`)
+      if (!res.ok) throw new Error("Failed to fetch orders")
+      return res.json()
+    }
+  })
+
+  const filteredOrders = orders
 
   return (
     <div className="flex min-h-screen">
@@ -142,16 +83,32 @@ export default function AdminOrdersPage() {
                 />
               </div>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm">
+                <Button 
+                  variant={statusFilter === "ALL" ? "outline" : "ghost"} 
+                  size="sm"
+                  onClick={() => setStatusFilter("ALL")}
+                >
                   All
                 </Button>
-                <Button variant="ghost" size="sm">
+                <Button 
+                  variant={statusFilter === "PAID" ? "outline" : "ghost"} 
+                  size="sm"
+                  onClick={() => setStatusFilter("PAID")}
+                >
                   Paid
                 </Button>
-                <Button variant="ghost" size="sm">
+                <Button 
+                  variant={statusFilter === "PENDING" ? "outline" : "ghost"} 
+                  size="sm"
+                  onClick={() => setStatusFilter("PENDING")}
+                >
                   Pending
                 </Button>
-                <Button variant="ghost" size="sm">
+                <Button 
+                  variant={statusFilter === "FAILED" ? "outline" : "ghost"} 
+                  size="sm"
+                  onClick={() => setStatusFilter("FAILED")}
+                >
                   Failed
                 </Button>
               </div>
@@ -187,59 +144,80 @@ export default function AdminOrdersPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border bg-card">
-                    {filteredOrders.map((order) => (
-                      <tr key={order.id} className="hover:bg-secondary/50">
-                        <td className="px-4 py-4">
-                          <span className="font-medium text-foreground">
-                            {order.orderNumber}
-                          </span>
-                        </td>
-                        <td className="px-4 py-4">
-                          <div>
-                            <p className="font-medium text-foreground">{order.customer}</p>
-                            <p className="text-sm text-muted-foreground">{order.email}</p>
-                          </div>
-                        </td>
-                        <td className="px-4 py-4">
-                          <span className="text-muted-foreground">{order.date}</span>
-                        </td>
-                        <td className="px-4 py-4">
-                          <Badge className={statusColors[order.status]}>
-                            {order.status}
-                          </Badge>
-                        </td>
-                        <td className="px-4 py-4">
-                          <span className="text-muted-foreground">{order.items}</span>
-                        </td>
-                        <td className="px-4 py-4">
-                          <span className="font-medium text-foreground">
-                            {order.total === 0 ? "Free" : `KES ${order.total.toLocaleString()}`}
-                          </span>
-                        </td>
-                        <td className="px-4 py-4 text-right">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon">
-                                <MoreHorizontal className="h-4 w-4" />
-                                <span className="sr-only">Actions</span>
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem className="gap-2">
-                                <Eye className="h-4 w-4" />
-                                View Details
-                              </DropdownMenuItem>
-                              {order.status === "PAID" && (
-                                <DropdownMenuItem className="gap-2">
-                                  <RefreshCw className="h-4 w-4" />
-                                  Process Refund
-                                </DropdownMenuItem>
-                              )}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                    {isLoading ? (
+                      <tr>
+                        <td colSpan={7} className="py-12 text-center">
+                          <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" />
+                          <p className="mt-2 text-muted-foreground">Loading orders...</p>
                         </td>
                       </tr>
-                    ))}
+                    ) : isError ? (
+                      <tr>
+                        <td colSpan={7} className="py-12 text-center">
+                          <p className="text-destructive font-medium">Failed to load orders</p>
+                        </td>
+                      </tr>
+                    ) : filteredOrders.length > 0 ? (
+                      filteredOrders.map((order) => (
+                        <tr key={order.id} className="hover:bg-secondary/50">
+                          <td className="px-4 py-4">
+                            <span className="font-medium text-foreground">
+                              {order.orderNumber}
+                            </span>
+                          </td>
+                          <td className="px-4 py-4">
+                            <div>
+                              <p className="font-medium text-foreground">{order.customer}</p>
+                              <p className="text-sm text-muted-foreground">{order.email}</p>
+                            </div>
+                          </td>
+                          <td className="px-4 py-4">
+                            <span className="text-muted-foreground">{order.date}</span>
+                          </td>
+                          <td className="px-4 py-4">
+                            <Badge className={statusColors[order.status as keyof typeof statusColors]}>
+                              {order.status}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-4">
+                            <span className="text-muted-foreground">{order.items}</span>
+                          </td>
+                          <td className="px-4 py-4">
+                            <span className="font-medium text-foreground">
+                              {order.total === 0 ? "Free" : `KES ${order.total.toLocaleString()}`}
+                            </span>
+                          </td>
+                          <td className="px-4 py-4 text-right">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon">
+                                  <MoreHorizontal className="h-4 w-4" />
+                                  <span className="sr-only">Actions</span>
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem className="gap-2">
+                                  <Eye className="h-4 w-4" />
+                                  View Details
+                                </DropdownMenuItem>
+                                {order.status === "PAID" && (
+                                  <DropdownMenuItem className="gap-2">
+                                    <RefreshCw className="h-4 w-4" />
+                                    Process Refund
+                                  </DropdownMenuItem>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={7} className="py-12 text-center">
+                          <p className="text-muted-foreground">No orders found</p>
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
