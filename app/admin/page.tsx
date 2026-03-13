@@ -1,3 +1,5 @@
+"use client"
+
 import Link from "next/link"
 import { AdminSidebar } from "@/components/admin/sidebar"
 import { AdminHeader } from "@/components/admin/header"

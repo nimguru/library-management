@@ -13,7 +13,7 @@ async function main() {
     create: {
       email: "admin@kitabu.com",
       name: "Admin User",
-      password: adminPassword,
+      passwordHash: adminPassword,
       role: "ADMIN",
     },
   })
@@ -58,11 +58,19 @@ async function main() {
   ]
 
   for (const book of books) {
-    await prisma.book.upsert({
-      where: { title: book.title }, // Simple fallback for seeding
-      update: {},
-      create: book,
+    // Check if book exists by title (since title isn't unique, we just take the first one or create)
+    const existing = await prisma.book.findFirst({
+      where: { title: book.title }
     })
+
+    if (!existing) {
+      await prisma.book.create({
+        data: {
+          ...book,
+          fileKey: `seeds/${book.title.toLowerCase().replace(/ /g, '-')}.pdf` // Mock file key
+        }
+      })
+    }
   }
 
   console.log("Seeding finished.")

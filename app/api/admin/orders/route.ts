@@ -55,9 +55,9 @@ export async function GET(req: Request) {
       email: order.user.email,
       date: order.createdAt.toLocaleDateString(),
       status: order.status,
-      total: Number(order.amount),
+      total: Number(order.totalAmount),
       items: order.items.length,
-      paymentMethod: order.status === "PAID" ? "IntaSend" : order.amount > 0 ? "Pending" : "Free"
+      paymentMethod: order.status === "PAID" ? "IntaSend" : order.totalAmount > 0 ? "Pending" : "Free"
     }))
 
     return NextResponse.json(formattedOrders)

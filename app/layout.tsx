@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import './globals.css'
 import QueryProvider from '@/components/providers/QueryProvider'
+import AuthProvider from '@/components/providers/AuthProvider'
 import { Toaster } from 'sonner'
 
 const _geist = Geist({ subsets: ["latin"] });
@@ -39,10 +40,12 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="font-sans antialiased">
-        <QueryProvider>
-          {children}
-          <Toaster position="top-center" richColors />
-        </QueryProvider>
+        <AuthProvider>
+          <QueryProvider>
+            {children}
+            <Toaster position="top-center" richColors />
+          </QueryProvider>
+        </AuthProvider>
         <Analytics />
       </body>
     </html>

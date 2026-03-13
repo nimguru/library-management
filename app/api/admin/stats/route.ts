@@ -13,7 +13,7 @@ export async function GET() {
 
     const totalRevenue = await prisma.order.aggregate({
       where: { status: "PAID" },
-      _sum: { amount: true }
+      _sum: { totalAmount: true }
     })
 
     const totalSales = await prisma.order.count({
@@ -37,7 +37,7 @@ export async function GET() {
 
     return NextResponse.json({
       stats: {
-        revenue: Number(totalRevenue._sum.amount || 0),
+        revenue: Number(totalRevenue._sum.totalAmount || 0),
         sales: totalSales,
         users: totalUsers,
         books: totalBooks
@@ -45,7 +45,7 @@ export async function GET() {
       recentOrders: recentOrders.map((o: any) => ({
         id: o.id,
         customer: o.user.name,
-        amount: Number(o.amount),
+        amount: Number(o.totalAmount),
         status: o.status,
         date: o.createdAt.toLocaleDateString()
       }))

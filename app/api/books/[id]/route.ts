@@ -15,6 +15,7 @@ const bookUpdateSchema = z.object({
   isFree: z.boolean().optional(),
   publishedYear: z.number().int().optional(),
   pageCount: z.number().int().optional(),
+  pages: z.number().int().optional(),
   language: z.string().optional(),
 })
 
@@ -51,9 +52,16 @@ export async function PATCH(
     const body = await req.json()
     const validatedData = bookUpdateSchema.parse(body)
 
+    // Map 'pages' to 'pageCount' for Prisma
+    const { pages, ...rest } = validatedData
+    const updateData = {
+      ...rest,
+      ...(pages !== undefined ? { pageCount: pages } : {})
+    }
+
     const book = await prisma.book.update({
       where: { id: params.id },
-      data: validatedData,
+      data: updateData,
     })
 
     return NextResponse.json(book)

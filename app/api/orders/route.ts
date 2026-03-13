@@ -12,7 +12,7 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json()
-    const { bookIds } = orderCreateSchema.parse(body)
+    const { bookIds, phoneNumber } = orderCreateSchema.parse(body)
 
     const books = await prisma.book.findMany({
       where: { id: { in: bookIds } }
@@ -23,12 +23,14 @@ export async function POST(req: Request) {
     }
 
     const total = books.reduce((sum: number, book: any) => sum + Number(book.price), 0)
+    const isFree = total === 0
 
-    // Create order in DB as PENDING
+    // Create order in DB
     const order = await prisma.order.create({
       data: {
         userId: session.user.id!,
         totalAmount: total,
+        status: isFree ? "PAID" : "PENDING",
         items: {
           create: books.map((book: any) => ({
             bookId: book.id,
@@ -38,12 +40,29 @@ export async function POST(req: Request) {
       }
     })
 
-    // Create IntaSend invoice/checkout
+    // If free, create download records immediately and return success URL
+    if (isFree) {
+      await prisma.download.createMany({
+        data: books.map((book: any) => ({
+          userId: session.user.id!,
+          bookId: book.id,
+        })),
+        skipDuplicates: true
+      })
+
+      return NextResponse.json({ 
+        url: `${process.env.NEXTAUTH_URL}/checkout/success?orderId=${order.id}`,
+        orderId: order.id 
+      })
+    }
+
+    // Create IntaSend invoice/checkout for paid orders
     try {
       const checkout = await intasend.collection().charge({
         first_name: session.user.name?.split(' ')[0] || 'User',
         last_name: session.user.name?.split(' ')[1] || 'Name',
         email: session.user.email,
+        phone_number: phoneNumber,
         amount: total,
         currency: 'KES',
         api_ref: order.id,

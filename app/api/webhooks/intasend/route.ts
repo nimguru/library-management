@@ -1,8 +1,17 @@
 import { prisma } from "@/lib/prisma"
 import { NextResponse } from "next/server"
+import crypto from "crypto"
 
 export async function POST(req: Request) {
   try {
+    const signature = req.headers.get("x-intasend-signature")
+    if (!signature && process.env.NODE_ENV === 'production') {
+      return NextResponse.json({ error: "Missing signature" }, { status: 401 })
+    }
+
+    // TODO: Implement actual signature verification with INTASEND_WEBHOOK_SECRET
+    // const hmac = crypto.createHmac('sha256', process.env.INTASEND_WEBHOOK_SECRET!)
+    
     const payload = await req.json()
 
     // IntaSend Webhook Payload Structure:

@@ -96,14 +96,67 @@ const statusColors = {
   REFUNDED: "bg-muted text-muted-foreground",
 }
 
+import { useQuery } from "@tanstack/react-query"
+import { useSession } from "next-auth/react"
+import { useRouter } from "next/navigation"
+import { Loader2 } from "lucide-react"
+
 export default function OrdersPage() {
   const [expandedOrders, setExpandedOrders] = useState<string[]>([])
+  const { data: session, status } = useSession()
+  const router = useRouter()
+
+  const { data: orders = [], isLoading, isError } = useQuery<Order[]>({
+    queryKey: ['my-orders'],
+    enabled: !!session,
+    queryFn: async () => {
+      const res = await fetch('/api/orders/me')
+      if (!res.ok) throw new Error("Failed to fetch orders")
+      return res.json()
+    }
+  })
+
+  if (status === "unauthenticated") {
+    router.push("/login")
+    return null
+  }
 
   const toggleOrder = (orderId: string) => {
     setExpandedOrders((prev) =>
       prev.includes(orderId)
         ? prev.filter((id) => id !== orderId)
         : [...prev, orderId]
+    )
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-screen">
+        <DashboardSidebar />
+        <div className="flex flex-1 flex-col">
+          <DashboardHeader />
+          <div className="flex flex-1 items-center justify-center">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="flex min-h-screen">
+        <DashboardSidebar />
+        <div className="flex flex-1 flex-col">
+          <DashboardHeader />
+          <div className="flex flex-1 flex-col items-center justify-center p-4 text-center">
+            <p className="text-destructive font-medium">Failed to load orders history</p>
+            <Button variant="outline" className="mt-4" onClick={() => window.location.reload()}>
+              Try Again
+            </Button>
+          </div>
+        </div>
+      </div>
     )
   }
 

@@ -42,7 +42,18 @@ export async function POST(req: Request) {
     const validatedData = bookSchema.parse(body)
 
     const book = await prisma.book.create({
-      data: validatedData,
+      data: {
+        title: validatedData.title,
+        author: validatedData.author,
+        description: validatedData.description,
+        price: validatedData.price,
+        isFree: validatedData.isFree,
+        coverUrl: validatedData.coverUrl || null,
+        genres: validatedData.genres,
+        language: validatedData.language,
+        pageCount: validatedData.pages || null,
+        fileKey: "pending-upload", // Should be updated after actual upload or handled by client
+      },
     })
 
     return NextResponse.json(book, { status: 201 })

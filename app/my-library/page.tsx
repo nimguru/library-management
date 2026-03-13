@@ -25,7 +25,7 @@ export default function MyLibraryPage() {
     queryKey: ['purchased-books', searchQuery],
     enabled: !!session,
     queryFn: async () => {
-      const res = await fetch(`/api/books?purchased=true`)
+      const res = await fetch(`/api/my-library`)
       if (!res.ok) throw new Error("Failed to fetch library")
       return res.json()
     }
@@ -40,13 +40,13 @@ export default function MyLibraryPage() {
   const handleDownload = async (book: any) => {
     try {
       toast.info("Preparing your download...")
-      const res = await fetch(`/api/books/${book.id}`)
+      const res = await fetch(`/api/downloads/${book.id}`)
       const data = await res.json()
       
       if (!res.ok) throw new Error(data.error || "Failed to get download link")
       
-      if (data.downloadUrl) {
-        window.open(data.downloadUrl, '_blank')
+      if (data.url) {
+        window.open(data.url, '_blank')
       } else {
         throw new Error("Download link not available")
       }

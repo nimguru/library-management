@@ -1,372 +1,320 @@
-# 📚 Library Management System — Next Phase Implementation Plan
+# 🔍 Kitabu — Audit Report: Requirements vs. Implementation
 
-> **Project:** Kitabu Digital Library  
-> **Stack:** Next.js 16 · PostgreSQL · Prisma · IntaSend · Cloudflare R2  
-> **Document Date:** March 13, 2026  
-
----
-
-## Executive Summary
-
-The project has a solid UI foundation: all major pages are scaffolded (home, books browse, book detail, cart, checkout, my-library, orders, auth, and the full admin panel) with polished shadcn/ui components and realistic mock data. However, **zero backend infrastructure exists** — no database, no auth, no API routes, no file storage, and no payment integration. Every page uses hardcoded mock data and placeholder handlers.
-
-The next phase is to replace the static shell with a fully working backend, wire the UI to real data, and deliver a functional end-to-end product.
+> **Analysed against:** `reqs/prd.md`  
+> **Date:** March 13, 2026
 
 ---
 
-## Current State Analysis
+## ✅ What You've Completed (Great Progress!)
 
-### ✅ What Exists (Done)
+You've done a significant amount of work since the last review. Here's what is now genuinely done:
 
-| Area | Status | Notes |
-|---|---|---|
-| UI Pages | ✅ Complete | All pages scaffolded with mock data |
-| shadcn/ui Components | ✅ Complete | Full component library installed |
-| Tailwind / Styling | ✅ Complete | Theme configured, responsive layouts done |
-| Form UI | ✅ Shells only | Login, register, checkout forms have no logic |
-| Cart UI | ✅ Shell only | Static mock items, no state management |
-| Admin Dashboard UI | ✅ Shell only | Mock stats and tables |
-| Book Browse + Search | ✅ Shell only | Filters work on hardcoded array only |
-
-### ❌ What Is Missing (Not Started)
-
-| Area | Status | Notes |
-|---|---|---|
-| Prisma + PostgreSQL | ❌ Missing | No `prisma/` folder, no schema, no migrations |
-| NextAuth.js | ❌ Missing | Not installed; login form is a mock `setTimeout` |
-| API Routes | ❌ Missing | No `app/api/` directory exists at all |
-| Middleware (route protection) | ❌ Missing | No `middleware.ts` |
-| Cloudflare R2 Integration | ❌ Missing | No SDK, no file upload, no signed URLs |
-| IntaSend Payment | ❌ Missing | Not installed; checkout is a fake `alert()` |
-| Cart State Management | ❌ Missing | No global state; cart is a hardcoded local array |
-| Zod Validation | ⚠️ Installed | Package present but unused — no schemas written |
-| React Hook Form Logic | ⚠️ Installed | Package present but forms have no `useForm` wiring |
-| TanStack Query | ❌ Missing | Not installed; no server state caching |
-| Environment Config | ❌ Missing | No `.env.local`, no `.env.example` |
-| `lib/` Utilities | ❌ Missing | No `prisma.ts`, `auth.ts`, `r2.ts`, `intasend.ts` |
-| Error / Loading States | ❌ Missing | No Suspense boundaries, no error.tsx files |
-| `src/` Directory Structure | ⚠️ Mismatch | PRD specifies `src/app/` but project uses `app/` at root |
+| Area | Status |
+|---|---|
+| All critical packages installed (Prisma, NextAuth, IntaSend, R2 SDK, bcryptjs, Zustand) | ✅ Done |
+| Prisma schema — full, matches PRD exactly | ✅ Done |
+| Prisma seed file | ✅ Done |
+| `lib/prisma.ts` singleton | ✅ Done |
+| `lib/auth.ts` with CredentialsProvider, JWT + session callbacks | ✅ Done |
+| `lib/r2.ts` with S3 client + `getSignedDownloadUrl` | ✅ Done |
+| `lib/intasend.ts` client singleton | ✅ Done |
+| `lib/store/cart.ts` Zustand store with persistence | ✅ Done |
+| `lib/validations/index.ts` Zod schemas (book, register, login, order) | ✅ Done |
+| `middleware.ts` protecting `/my-library`, `/admin`, `/checkout` | ✅ Done |
+| `app/api/auth/[...nextauth]/route.ts` | ✅ Done |
+| `app/api/auth/register/route.ts` | ✅ Done |
+| `app/api/books/route.ts` (GET list + POST create) | ✅ Done |
+| `app/api/books/[id]/route.ts` (GET + PATCH + DELETE) | ✅ Done |
+| `app/api/orders/route.ts` (POST with IntaSend integration) | ✅ Done |
+| `app/api/orders/[id]/route.ts` (GET with ownership check) | ✅ Done |
+| `app/api/downloads/[bookId]/route.ts` (signed URL) | ✅ Done |
+| `app/api/webhooks/intasend/route.ts` (payment → Download records) | ✅ Done |
+| `app/api/upload/route.ts` (presigned upload URL for R2) | ✅ Done |
+| `app/api/admin/stats/route.ts` | ✅ Done |
+| `app/api/admin/orders/route.ts` | ✅ Done |
+| `app/api/admin/users/route.ts` (GET + PATCH role) | ✅ Done |
+| Login page wired to `signIn()` with toast feedback | ✅ Done |
+| Register page wired to `POST /api/auth/register` | ✅ Done |
+| Books page (`/books`) uses `useQuery` → real API | ✅ Done |
+| Cart page uses Zustand store (real state) | ✅ Done |
+| Checkout page wired to `POST /api/orders` + IntaSend redirect | ✅ Done |
+| My Library uses `useQuery` with loading/error states | ✅ Done |
+| Admin dashboard pulls real stats via `useQuery` | ✅ Done |
+| Admin books page: list, search, delete mutation | ✅ Done |
+| `QueryProvider` wrapping the app in `layout.tsx` | ✅ Done |
+| Sonner `<Toaster>` in layout | ✅ Done |
+| `app/error.tsx` global error boundary | ✅ Done |
+| `app/books/loading.tsx` and `app/admin/loading.tsx` | ✅ Done |
+| Header shows live cart badge count + session-aware auth buttons | ✅ Done |
 
 ---
 
-## Implementation Phases
+## ❌ What Is Still Missing
 
----
+### 1. `DATABASE_URL` Missing from Prisma Schema
+**File:** `prisma/schema.prisma`  
+The `datasource db` block has no `url` field:
+```prisma
+// ❌ CURRENT — will fail to connect
+datasource db {
+  provider = "postgresql"
+}
 
-### Phase 1 — Foundation & Infrastructure
-**Goal:** Get a working database, auth, and environment before building any features.  
-**Estimated effort:** 2–3 days
-
-#### 1.1 Install Missing Dependencies
-
-```bash
-# Database & Auth
-pnpm add prisma @prisma/client next-auth@beta bcryptjs
-pnpm add -D @types/bcryptjs
-
-# Cloudflare R2
-pnpm add @aws-sdk/client-s3 @aws-sdk/s3-request-presigner
-
-# Payment
-pnpm add intasend-node
-
-# State & Data Fetching
-pnpm add @tanstack/react-query @tanstack/react-query-devtools
-
-# Cart State
-pnpm add zustand
-```
-
-#### 1.2 Environment Variables
-
-Create `.env.local` and a committed `.env.example`:
-
-```env
-DATABASE_URL="postgresql://USER:PASSWORD@HOST:5432/digital_library"
-NEXTAUTH_SECRET=""
-NEXTAUTH_URL="http://localhost:3000"
-R2_ACCOUNT_ID=""
-R2_ACCESS_KEY_ID=""
-R2_SECRET_ACCESS_KEY=""
-R2_BUCKET_NAME="digital-library-books"
-R2_PUBLIC_URL=""
-INTASEND_PUBLISHABLE_KEY=""
-INTASEND_SECRET_KEY=""
-INTASEND_WEBHOOK_SECRET=""
-```
-
-#### 1.3 Prisma Setup
-
-```bash
-npx prisma init
-# Paste the full schema from prd.md into prisma/schema.prisma
-npx prisma migrate dev --name init
-npx prisma generate
-```
-
-Create `lib/prisma.ts` (singleton pattern from PRD Section 5.1).
-
-#### 1.4 NextAuth Setup
-
-Create `lib/auth.ts` with CredentialsProvider (from PRD Section 7.1).  
-Create `app/api/auth/[...nextauth]/route.ts`.  
-Create `middleware.ts` to protect `/my-library`, `/orders`, `/checkout`, and `/admin` routes (from PRD Section 7.2).
-
-#### 1.5 Utility Clients
-
-- Create `lib/r2.ts` — R2 S3 client + `getSignedDownloadUrl()` (PRD Section 5.2)
-- Create `lib/intasend.ts` — IntaSend client singleton
-
-**Phase 1 Exit Criteria:** `npx prisma studio` shows the database, login/register pages authenticate against a real user record, and protected routes redirect unauthenticated users.
-
----
-
-### Phase 2 — Core API Routes
-**Goal:** Build all server-side API endpoints the UI needs.  
-**Estimated effort:** 3–4 days
-
-#### 2.1 Authentication API
-
-| File | Action |
-|---|---|
-| `app/api/auth/register/route.ts` | POST — hash password with bcrypt, create User |
-| Connect login form | Wire `handleSubmit` to `signIn()` from NextAuth |
-
-#### 2.2 Books API
-
-| File | Action |
-|---|---|
-| `app/api/books/route.ts` | GET — list with search, genre filter, pagination. POST (admin) — create book record |
-| `app/api/books/[id]/route.ts` | GET — single book. PATCH (admin) — update. DELETE (admin) — remove |
-
-Add Zod schemas for all inputs. Return proper HTTP error codes.
-
-#### 2.3 Orders API
-
-| File | Action |
-|---|---|
-| `app/api/orders/route.ts` | POST — create Order (PENDING), call IntaSend, return checkout URL |
-| `app/api/orders/[id]/route.ts` | GET — return order status for the authenticated user |
-
-#### 2.4 Downloads API
-
-| File | Action |
-|---|---|
-| `app/api/downloads/[bookId]/route.ts` | GET — verify ownership via Download record, return signed R2 URL (15-min expiry) |
-
-#### 2.5 IntaSend Webhook
-
-| File | Action |
-|---|---|
-| `app/api/webhooks/intasend/route.ts` | POST — verify signature, update Order to PAID, upsert Download records in a transaction |
-
-#### 2.6 Admin API
-
-| File | Action |
-|---|---|
-| `app/api/admin/users/route.ts` | GET — paginated user list (Admin only) |
-| `app/api/admin/orders/route.ts` | GET — all orders with user info (Admin only) |
-| `app/api/admin/books/upload/route.ts` | POST — receive file, upload to R2, save `fileKey` to Book |
-
-**Phase 2 Exit Criteria:** All API routes return real data from PostgreSQL. Webhook correctly marks an order as PAID. Postman/Thunder Client tests pass for all routes.
-
----
-
-### Phase 3 — Connect UI to Real Data
-**Goal:** Replace all mock data and placeholder handlers in the frontend.  
-**Estimated effort:** 4–5 days
-
-#### 3.1 Auth Forms
-
-- `app/login/page.tsx` — Replace mock `setTimeout` with `signIn('credentials', {...})`. Show error messages on failure.
-- `app/register/page.tsx` — Wire form to `POST /api/auth/register` using React Hook Form + Zod schema. Redirect to login on success.
-
-#### 3.2 Global Cart State (Zustand)
-
-Create `lib/store/cart.ts`:
-
-```ts
-// Zustand store
-interface CartStore {
-  items: CartItem[]
-  addItem: (book: Book) => void
-  removeItem: (id: string) => void
-  clearCart: () => void
-  total: () => number
+// ✅ REQUIRED
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 ```
-
-- Replace hardcoded `initialCartItems` in `app/cart/page.tsx` with Zustand store.
-- Wire the `onAddToCart` callback in `BookCard` to `addItem`.
-- Update cart icon in `components/header.tsx` to show live item count badge.
-
-#### 3.3 Books Pages
-
-- `app/books/page.tsx` — Replace mock `allBooks` array with `useQuery` call to `GET /api/books`. Add server-side search params. Add pagination.
-- `app/books/[id]/page.tsx` — Fetch single book from `GET /api/books/[id]`. Wire "Add to Cart" to Zustand store. Show "Already Purchased" state if user owns the book.
-
-#### 3.4 Checkout Flow
-
-- `app/checkout/page.tsx` — Replace mock `handleCheckout` with real `POST /api/orders`. On success, redirect user to IntaSend-hosted checkout URL. Handle payment success/failure redirect.
-
-#### 3.5 My Library Page
-
-- `app/my-library/page.tsx` — Replace mock `purchasedBooks` array with `GET /api/downloads` (or derive from user's Orders). Wire Download button to `GET /api/downloads/[bookId]` → open signed URL in new tab.
-
-#### 3.6 Orders History Page
-
-- `app/orders/page.tsx` — Fetch user's orders from `GET /api/orders`. Show real statuses (PENDING, PAID, FAILED).
-
-#### 3.7 TanStack Query Setup
-
-Wrap `app/layout.tsx` with `QueryClientProvider`. Use `useQuery` for all data-fetching pages. Add loading skeletons and error states.
-
-**Phase 3 Exit Criteria:** A user can register, browse books, add to cart, checkout via M-Pesa (sandbox), and see their purchased book in My Library with a working download link.
+Without this, `npx prisma migrate dev` and all database operations will fail entirely.
 
 ---
 
-### Phase 4 — Admin Panel
-**Goal:** Make the admin panel fully functional.  
-**Estimated effort:** 3–4 days
-
-#### 4.1 Admin Book Management (`app/admin/books/page.tsx`)
-
-- Fetch real book list from `GET /api/books`.
-- Add "New Book" dialog with a form: title, author, ISBN, genres, price, description, cover image URL.
-- Add file upload input for the PDF/EPUB file — upload to `POST /api/admin/books/upload` which stores to R2.
-- Add Edit and Delete actions per row.
-
-#### 4.2 Admin Orders (`app/admin/orders/page.tsx`)
-
-- Fetch all orders from `GET /api/admin/orders`.
-- Show order status with color badges.
-- Add filter by status (PENDING / PAID / FAILED / REFUNDED).
-
-#### 4.3 Admin Users (`app/admin/users/page.tsx`)
-
-- Fetch all users from `GET /api/admin/users`.
-- Show user role badge (MEMBER / ADMIN).
-- Add ability to promote/demote a user role.
-
-#### 4.4 Admin Dashboard Stats (`app/admin/page.tsx`)
-
-- Replace mock stats with real aggregation queries (total books, users, orders, revenue) via a `GET /api/admin/stats` route.
-- Replace mock "Recent Orders" table with live data.
-
-**Phase 4 Exit Criteria:** An admin can log in, upload a new book with a PDF file, see all real orders, and view all users.
-
----
-
-### Phase 5 — Validation, Error Handling & Polish
-**Goal:** Production-grade robustness.  
-**Estimated effort:** 2–3 days
-
-#### 5.1 Zod Validation
-
-Write Zod schemas for every API input:
-
-```ts
-// Example: lib/validations/book.ts
-export const createBookSchema = z.object({
-  title: z.string().min(1).max(200),
-  author: z.string().min(1),
-  price: z.number().nonnegative(),
-  genres: z.array(z.string()).min(1),
-  description: z.string().min(10),
-  isFree: z.boolean().default(false),
-})
+### 2. No `.env.local` / `.env.example` File
+The project has no environment configuration file committed. Every developer who clones this will be stuck. Add a `.env.example` (committed) listing all required keys:
+```env
+DATABASE_URL=
+NEXTAUTH_SECRET=
+NEXTAUTH_URL=http://localhost:3000
+R2_ACCOUNT_ID=
+R2_ACCESS_KEY_ID=
+R2_SECRET_ACCESS_KEY=
+R2_BUCKET_NAME=
+R2_PUBLIC_URL=
+R2_CUSTOM_DOMAIN=
+INTASEND_PUBLISHABLE_KEY=
+INTASEND_SECRET_KEY=
+INTASEND_WEBHOOK_SECRET=
 ```
 
-Validate in every API route. Return 400 with field-level error messages.
+---
 
-#### 5.2 Error Boundaries
+### 3. No `SessionProvider` in Layout
+**File:** `app/layout.tsx`  
+`next-auth/react` hooks (`useSession`, `signIn`, `signOut`) require a `<SessionProvider>` wrapping the app. It is missing — these hooks will silently return `null` or throw errors at runtime.
 
-- Create `app/error.tsx` — global error fallback
-- Create `app/not-found.tsx` — 404 page
-- Add per-route `loading.tsx` files for Suspense streaming
-
-#### 5.3 Toast Notifications
-
-Wire `sonner` (already installed) to all user actions:
-- "Added to cart"
-- "Order placed successfully"
-- "Download starting..."
-- "Error: please try again"
-
-#### 5.4 Webhook Security
-
-Implement IntaSend webhook signature verification before processing any payment callbacks. Log webhook events.
-
-#### 5.5 Database Seeding
-
-Create `prisma/seed.ts` to seed initial books and an admin user for development.
+```tsx
+// ✅ Required addition to layout.tsx
+import { SessionProvider } from "next-auth/react"
+// Wrap children with <SessionProvider>
+```
 
 ---
 
-### Phase 6 — Deployment
-**Goal:** Ship to production.  
-**Estimated effort:** 1 day
-
-Follow the PRD Deployment Checklist (Section 11):
-
-- Deploy Next.js app to **Vercel** via GitHub integration
-- Provision PostgreSQL on **Neon.tech** or Supabase
-- Create **Cloudflare R2** bucket with CORS policy
-- Configure all environment variables in Vercel project settings
-- Register **IntaSend webhook URL** pointing to production endpoint
-- Switch IntaSend to live keys
-- Run a real KES 1 test transaction end-to-end
-- Verify signed download URLs work from production domain
+### 4. No `checkout/success` Page
+**File:** `app/api/orders/route.ts` references a redirect URL:
+```ts
+redirect_url: `${process.env.NEXTAUTH_URL}/checkout/success?orderId=${order.id}`
+```
+The page `app/checkout/success/page.tsx` does not exist. After payment, users will land on a 404. This page should show a confirmation message, clear the cart, and link to My Library.
 
 ---
 
-## Recommended Build Order
+### 5. `app/orders/page.tsx` Still Uses Mock Data
+The user-facing Orders History page was **not updated**. It still uses a hardcoded `const orders: Order[]` array instead of fetching from `GET /api/orders/[id]` or a user orders list endpoint. There is also no `GET /api/orders` (list all user orders) route — only `GET /api/orders/[id]` exists.
 
-Follow the PRD's recommended workflow exactly:
-
-1. **Phase 1** — Database schema + auth (no UI changes yet)
-2. **Phase 2** — API routes (test with Postman/curl before touching UI)
-3. **Phase 3.1–3.2** — Auth forms + cart state
-4. **Phase 3.3–3.4** — Books browsing + checkout
-5. **Phase 3.5–3.6** — My Library + Orders
-6. **Phase 4** — Admin panel (CRUD + file upload)
-7. **Phase 5** — Validation, error handling, toast polish
-8. **Phase 6** — Deploy
-
-> **Important:** Do not start Phase 3 until Phase 2 API routes are tested and verified. Connecting UI to untested APIs wastes time debugging at two layers simultaneously.
+**Needs:**
+- A `GET /api/orders` route (list all orders for the current user, not just admin)
+- The `/orders` page wired to `useQuery` calling that endpoint
 
 ---
 
-## Known Gaps vs PRD
+### 6. `my-library/page.tsx` Calls the Wrong API
+**File:** `app/my-library/page.tsx`  
+The download handler calls `GET /api/books/${book.id}` and looks for `data.downloadUrl`, but that route only returns a book record — not a download URL. The correct endpoint is `GET /api/downloads/${book.id}`.
 
-| PRD Requirement | Gap | Priority |
-|---|---|---|
-| `src/` directory structure | Project uses `app/` at root; PRD shows `src/app/`. Minor — either works, but choose one and be consistent | Low |
-| `intasend-node` not installed | Missing from `package.json` | **Critical** |
-| `next-auth@beta` not installed | Missing from `package.json` | **Critical** |
-| `prisma` not installed | Missing from `package.json` | **Critical** |
-| `@aws-sdk/*` not installed | Missing from `package.json` | **Critical** |
-| `zustand` not mentioned in PRD | PRD uses "Zustand or React context" — recommend Zustand for simplicity | Medium |
-| `bcryptjs` not installed | Needed for password hashing | **Critical** |
-| No `prisma/seed.ts` | Useful for dev workflow | Low |
-| No `.env.example` | Should be committed to repo | Medium |
-| Review system (Rating model exists) | UI for submitting reviews not scaffolded | Low (post-launch) |
+Also, the query fetches `/api/books?purchased=true` — but the books API has no `purchased` filter. There is no mechanism to return only books the current user has purchased. A separate endpoint like `GET /api/my-library` or a `purchased=true` filter in the books API is needed.
 
 ---
 
-## v2 Backlog (Post-Launch)
-
-Per PRD Section 12 — defer these until the core product ships:
-
-- In-browser PDF reader (`react-pdf`)
-- Email notifications with Resend (order confirmation, download ready)
-- Book wishlist / save for later
-- Genre-based recommendations
-- Discount codes and promotional pricing
-- Author profile pages
-- Bulk CSV import for admins
-- Review and rating submission UI
+### 7. Admin Books Page — "Add Book" Button Does Nothing
+**File:** `app/admin/books/page.tsx`  
+The `<Button>Add Book</Button>` exists in the UI but has no `onClick` handler and no dialog/form wired to it. Admins cannot create books from the UI. The `POST /api/books` and `POST /api/upload` routes exist but are never called from the frontend.
 
 ---
 
-*Plan prepared against `reqs/prd.md` — Digital Library Management System Full Stack Starter Guide.*
+### 8. Admin Dashboard Page — Missing `"use client"` Directive
+**File:** `app/admin/page.tsx`  
+This page uses `useQuery` (a React hook), which requires it to be a Client Component. The file has no `"use client"` directive at the top. This will cause a build error:
+> Error: `useState` and `useQuery` cannot be used in a Server Component.
+
+---
+
+### 9. IntaSend Webhook Has No Signature Verification
+**File:** `app/api/webhooks/intasend/route.ts`  
+The webhook processes payment callbacks with zero authentication. Anyone can hit this endpoint with a fake payload and mark any order as PAID. The PRD mentions verifying the webhook signature — this critical security step is not implemented.
+
+---
+
+### 10. No `not-found.tsx` (404 Page)
+The PRD's Phase 5 polish list includes this. `app/error.tsx` exists but `app/not-found.tsx` does not.
+
+---
+
+### 11. Admin Books Page — No "Edit Book" Form
+The edit (pencil) icon in the books table dropdown exists but likely has no form wired to it. The `PATCH /api/books/[id]` endpoint exists server-side, but the admin UI has no dialog/modal to actually edit a book's details.
+
+---
+
+### 12. Free Books Flow Not Handled
+When `book.isFree === true`, the order flow still calls `POST /api/orders` → IntaSend. A free book should bypass payment entirely and directly create a `Download` record. Currently, free books would go through the payment gateway unnecessarily, which will either fail or charge KES 0.
+
+---
+
+## 🐛 Bugs Found
+
+### Bug 1 — `prisma.order.aggregate` Queries Wrong Field (Will Crash)
+**File:** `app/api/admin/stats/route.ts`, line ~18  
+```ts
+// ❌ BUG — 'amount' does not exist on Order model
+const totalRevenue = await prisma.order.aggregate({
+  where: { status: "PAID" },
+  _sum: { amount: true }  // ← Field is 'totalAmount', not 'amount'
+})
+```
+The Prisma schema names the field `totalAmount`. This will throw a runtime error every time the admin dashboard loads.  
+**Fix:**
+```ts
+_sum: { totalAmount: true }
+// and update reference:
+revenue: Number(totalRevenue._sum.totalAmount || 0)
+```
+
+---
+
+### Bug 2 — Admin Orders API References Wrong Field (`order.amount`)
+**File:** `app/api/admin/orders/route.ts`, line ~53  
+```ts
+// ❌ BUG — same issue
+total: Number(order.amount),  // 'amount' doesn't exist
+paymentMethod: order.amount > 0 ? "Pending" : "Free"  // also broken
+```
+**Fix:** Replace with `order.totalAmount`.
+
+---
+
+### Bug 3 — Admin Stats API References Wrong Field (`o.amount`)
+**File:** `app/api/admin/stats/route.ts`, in `recentOrders.map()`
+```ts
+amount: Number(o.amount),  // ❌ should be o.totalAmount
+```
+
+---
+
+### Bug 4 — Seed File References Wrong Field (`password` instead of `passwordHash`)
+**File:** `prisma/seed.ts`, line ~14  
+```ts
+// ❌ BUG — Prisma schema has 'passwordHash', not 'password'
+create: {
+  email: "admin@kitabu.com",
+  name: "Admin User",
+  password: adminPassword,  // ← wrong field name
+  role: "ADMIN",
+},
+```
+Running `npx prisma db seed` will throw a Prisma validation error.  
+**Fix:** Change `password` to `passwordHash`.
+
+---
+
+### Bug 5 — Seed File Uses Non-Existent Unique Field for `upsert`
+**File:** `prisma/seed.ts`, line ~43  
+```ts
+// ❌ BUG — 'title' is not a @unique field on Book
+await prisma.book.upsert({
+  where: { title: book.title },  // ← will throw error
+```
+Prisma `upsert` requires a unique field. `title` is not marked `@unique` in the schema.  
+**Fix:** Either use `isbn` (if you set it in seed data) or use `create`/`findFirst` pattern instead of `upsert`.
+
+---
+
+### Bug 6 — `books/route.ts` POST Sends Wrong Shape to Prisma
+**File:** `app/api/books/route.ts`  
+The `bookSchema` in `lib/validations/index.ts` includes fields like `fileUrl`, `fileFormat`, `pages` which do **not exist** on the Prisma `Book` model. The model expects `fileKey`, `pageCount`, and has no `fileFormat` or `fileUrl`. Calling `prisma.book.create({ data: validatedData })` will fail because of unknown fields.  
+**Fix:** Map `validatedData` to the correct Prisma model shape before calling create.
+
+---
+
+### Bug 7 — `R2_CUSTOM_DOMAIN` env var is Undefined in Upload Route
+**File:** `app/api/upload/route.ts`, line ~35  
+```ts
+const publicUrl = `https://${process.env.R2_CUSTOM_DOMAIN}/${fileKey}`
+```
+`R2_CUSTOM_DOMAIN` is not listed in the PRD env vars (it uses `R2_PUBLIC_URL`). If undefined, all upload responses return `"https://undefined/..."` as the public URL.  
+**Fix:** Use `process.env.R2_PUBLIC_URL` consistently, or add `R2_CUSTOM_DOMAIN` to `.env`.
+
+---
+
+### Bug 8 — Register Page Says "8 characters" but Zod Validates Minimum 6
+**File:** `app/register/page.tsx`, UI hint reads:
+> "Must be at least 8 characters"
+
+But `lib/validations/index.ts`:
+```ts
+password: z.string().min(6, "Password must be at least 6 characters")
+```
+This is a minor UX inconsistency — users will see the UI hint say 8 but can register with 6.
+
+---
+
+### Bug 9 — `checkout/page.tsx` Phone Number Not Passed to IntaSend
+**File:** `app/checkout/page.tsx`  
+The M-Pesa phone number input is captured in state (`phoneNumber`) but is **never sent** in the `POST /api/orders` request body. IntaSend requires the phone number for STK Push to work. M-Pesa payments will either fail or fall back to a generic hosted page that re-asks for the number.
+
+---
+
+### Bug 10 — `my-library` Download Handler Calls Wrong Endpoint
+**File:** `app/my-library/page.tsx`  
+```ts
+// ❌ BUG — calls the book detail API, not the download API
+const res = await fetch(`/api/books/${book.id}`)
+const data = await res.json()
+if (data.downloadUrl) { ... }  // 'downloadUrl' never exists in book response
+```
+**Fix:**
+```ts
+const res = await fetch(`/api/downloads/${book.id}`)
+const data = await res.json()
+if (data.url) { window.open(data.url, '_blank') }
+```
+
+---
+
+## Summary Table
+
+| Category | Count |
+|---|---|
+| ✅ Requirements completed | ~33 items |
+| ❌ Requirements still missing | 12 items |
+| 🐛 Bugs (will crash or break functionality) | 10 bugs |
+
+### Priority Order for Fixes
+
+**Fix immediately (blockers):**
+1. Add `url = env("DATABASE_URL")` to schema — nothing works without this
+2. Fix `passwordHash` field name in seed — seeding fails
+3. Fix `totalAmount` field name in admin stats/orders APIs — admin dashboard crashes
+4. Add `SessionProvider` to `layout.tsx` — auth hooks won't work
+5. Fix `bookSchema` → Prisma field mapping in `POST /api/books`
+6. Fix download handler in `my-library` to call correct endpoint
+
+**Fix soon (broken features):**
+7. Wire "Add Book" form in admin books page
+8. Create `app/checkout/success/page.tsx`
+9. Add user orders list API + wire `/orders` page off mock data
+10. Handle free books bypass in checkout flow
+11. Pass phone number to `POST /api/orders` for M-Pesa STK Push
+12. Fix seed `upsert` to use a valid unique field
+
+**Polish:**
+13. Add webhook signature verification
+14. Add `.env.example`
+15. Add `"use client"` to admin dashboard page
+16. Add `app/not-found.tsx`
+17. Fix `R2_CUSTOM_DOMAIN` → `R2_PUBLIC_URL` env var
+18. Fix password minimum length inconsistency (UI says 8, Zod validates 6)
+
+---
+
+*Audited against `reqs/prd.md` — Digital Library Management System.*
