@@ -1,314 +1,478 @@
-# Kitabu — Data Flow & Access Audit
-> Focused on how data moves through the system: what's exposed, what's trusted, what's missing.
-> Prisma v7 `DATABASE_URL`-in-config-only is noted as intentional — not flagged.
+# Kitabu — v6 Full Audit
+> Focus: root cause of 500s, database access, broken feature flows
+> Prisma v7 — `url` absent from schema datasource is intentional ✓
 
 ---
 
-## 🔴 Critical Data Issues
+## Why Every API is Returning 500 — The Root Causes
+
+There are **three compounding root causes** that make the entire database layer fail. They must all be fixed together.
 
 ---
 
-### 1. `fileKey` is exposed to every unauthenticated user
-**Files:** `GET /api/books` · `GET /api/books/[id]`
+### ROOT CAUSE 1 — Wrong Prisma generator provider (`prisma-client-js` vs `prisma-client`)
+**File:** `prisma/schema.prisma`
 
-Both public endpoints call `prisma.book.findMany()` and `prisma.book.findUnique()` with no `select` clause. This means the full `Book` record is returned — including `fileKey`, the private R2 object key. Any visitor can open DevTools on the books page and harvest the storage keys for every book in the library, then construct direct R2 URLs to download without paying.
-
-```ts
-// ❌ Current — returns fileKey to everyone
-const books = await prisma.book.findMany({ where: { ... } })
-return NextResponse.json(books)
-
-// ✅ Fix — use select to strip the private field
-const books = await prisma.book.findMany({
-  where: { ... },
-  select: {
-    id: true, title: true, author: true, isbn: true,
-    genres: true, description: true, coverUrl: true,
-    price: true, isFree: true, publishedYear: true,
-    pageCount: true, language: true, createdAt: true,
-    // fileKey intentionally omitted
-  }
-})
-```
-
----
-
-### 2. `lib/prisma.ts` uses the Prisma v6 client pattern — incompatible with v7
-**File:** `lib/prisma.ts`
-
-The schema uses `provider = "prisma-client-js"` (v6 legacy) and `lib/prisma.ts` instantiates the client with `new PrismaClient()` (no adapter). Per the Prisma v7 architecture, the correct provider is `prisma-client` and instantiation requires a driver adapter — otherwise the constructor throws `"Expected 1 argument, but got 0"`. Every single API route imports from this file, so this breaks the entire application.
-
-```ts
-// ❌ Current schema generator
+```prisma
+// ❌ Current — v6 legacy provider
 generator client {
-  provider = "prisma-client-js"   // v6 legacy
+  provider = "prisma-client-js"
 }
 
-// ✅ v7 schema generator (also needs output path)
+// ✅ Fix — v7 provider, with mandatory output path
 generator client {
   provider = "prisma-client"
   output   = "../src/generated/prisma"
 }
+```
 
-// ❌ Current lib/prisma.ts — no adapter
-export const prisma = globalForPrisma.prisma ?? new PrismaClient({ log: ['query'] })
+With `prisma-client-js`, Prisma v7 generates the wrong client format. The generated code is incompatible with the runtime, causing every `prisma.*` call to fail. After changing this, run `npx prisma generate` to regenerate the client.
 
-// ✅ v7 lib/prisma.ts — with pg adapter
+---
+
+### ROOT CAUSE 2 — `new PrismaClient()` called with no adapter (throws in Prisma v7)
+**File:** `lib/prisma.ts`
+
+```ts
+// ❌ Current — v6 style, throws "Expected 1 argument, but got 0" in v7
+export const prisma =
+  globalForPrisma.prisma ?? new PrismaClient({ log: ['query'] })
+```
+
+Prisma v7 removed the built-in Rust connection engine. The client **requires** a driver adapter — it cannot connect to Postgres on its own. Every route imports `prisma` from this file, so every single API call to the database crashes before even reaching the query.
+
+```ts
+// ✅ Fix — install @prisma/adapter-pg and pg, then:
 import { PrismaClient } from '../src/generated/prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
 import pg from 'pg'
 
-const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL })
-const adapter = new PrismaPg(pool)
+const globalForPrisma = globalThis as unknown as { prisma: PrismaClient | undefined }
 
-export const prisma = globalForPrisma.prisma ?? new PrismaClient({ adapter })
+function createPrismaClient() {
+  const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL })
+  const adapter = new PrismaPg(pool)
+  return new PrismaClient({ 
+    adapter,
+    log: process.env.NODE_ENV === 'development' ? ['query'] : [],
+  })
+}
+
+export const prisma = globalForPrisma.prisma ?? createPrismaClient()
+
+if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma
+```
+
+Also update the import path in every route that uses `@/lib/prisma` — the import itself stays the same, only the internal implementation changes.
+
+---
+
+### ROOT CAUSE 3 — Missing packages: `@prisma/adapter-pg`, `pg`, `dotenv`
+**File:** `package.json`
+
+```json
+// ❌ None of these are in package.json
+"@prisma/adapter-pg": "...",
+"pg": "...",
+"dotenv": "..."
+```
+
+- `@prisma/adapter-pg` and `pg` — required for the adapter pattern (Root Cause 2)
+- `dotenv` — required by `prisma.config.ts` which has `import "dotenv/config"` at the top. Without it the CLI cannot load `DATABASE_URL` and migrations/seeding fail
+
+```bash
+pnpm add @prisma/adapter-pg pg dotenv
+pnpm add -D @types/pg
+```
+
+After installing, run:
+```bash
+npx prisma generate   # regenerate client with new provider
+npx prisma db push    # or migrate deploy
 ```
 
 ---
 
-### 3. Admin stats and orders still reference `order.amount` — field doesn't exist
-**Files:** `app/api/admin/stats/route.ts` · `app/api/admin/orders/route.ts`
+## Additional Bugs Causing 500s in Specific Routes
 
-The Prisma `Order` model defines `totalAmount`. Both admin routes still use `amount` in three places: the aggregate `_sum`, the revenue mapping, and the orders list formatting. These will return `NaN` / `0` for all revenue data and crash the admin dashboard at runtime.
+Even after fixing the three root causes above, these will still produce errors:
+
+---
+
+### BUG 4 — Admin stats uses `amount` field that doesn't exist on `Order`
+**File:** `app/api/admin/stats/route.ts`
+
+The `Order` model has `totalAmount`. These three references to `amount` cause Prisma to throw a runtime field validation error:
 
 ```ts
-// ❌ In stats route (3 occurrences)
-_sum: { amount: true }
-revenue: Number(totalRevenue._sum.amount || 0)
-amount: Number(o.amount)
+// ❌ All three wrong
+_sum: { amount: true }                          // line 16
+revenue: Number(totalRevenue._sum.amount || 0)  // line 40
+amount: Number(o.amount),                       // line 48
 
 // ✅ Fix
 _sum: { totalAmount: true }
 revenue: Number(totalRevenue._sum.totalAmount || 0)
-amount: Number(o.totalAmount)
+amount: Number(o.totalAmount),
+```
 
-// ❌ In admin orders route (2 occurrences)
-total: Number(order.amount)
-order.amount > 0 ? "Pending" : "Free"
+---
+
+### BUG 5 — Admin orders uses `order.amount` field that doesn't exist
+**File:** `app/api/admin/orders/route.ts`
+
+```ts
+// ❌ Both wrong
+total: Number(order.amount),
+paymentMethod: order.status === "PAID" ? "IntaSend" : order.amount > 0 ? "Pending" : "Free"
 
 // ✅ Fix
-total: Number(order.totalAmount)
-Number(order.totalAmount) > 0 ? "Pending" : "Free"
+total: Number(order.totalAmount),
+paymentMethod: order.status === "PAID" ? "IntaSend" : Number(order.totalAmount) > 0 ? "Pending" : "Free"
 ```
 
 ---
 
-## 🟠 Logic & Flow Bugs
+### BUG 6 — `POST /api/books` passes `bookSchema` directly to Prisma (field mismatch → 500)
+**File:** `app/api/books/route.ts` + `lib/validations/index.ts`
 
----
-
-### 4. Users can re-purchase books they already own
-**File:** `app/api/orders/route.ts`
-
-Before creating an order, the route validates that the books exist but never checks whether the user already has a `Download` record for any of them. A user can add a book they already purchased back to their cart and pay for it again — creating a duplicate order and charging them twice.
+`bookSchema` contains `fileUrl`, `fileFormat`, and `pages` — none of which exist on the `Book` model. `prisma.book.create({ data: validatedData })` throws an unknown field error.
 
 ```ts
-// ✅ Fix — add a check before creating the order
-const existingDownloads = await prisma.download.findMany({
-  where: {
-    userId: session.user.id!,
-    bookId: { in: bookIds }
-  }
+// ❌ bookSchema has wrong fields
+fileUrl: z.string()...    // not in Prisma model
+fileFormat: z.string()... // not in Prisma model
+pages: z.number()...      // Prisma field is pageCount
+
+// ✅ Option A — fix the schema
+export const bookSchema = z.object({
+  title: z.string().min(1, "Title is required"),
+  author: z.string().min(1, "Author is required"),
+  description: z.string().min(10),
+  price: z.number().min(0),
+  isFree: z.boolean().default(false),
+  coverUrl: z.string().url().optional().or(z.literal("")),
+  fileKey: z.string().min(1, "File key is required"),
+  genres: z.array(z.string()).min(1),
+  language: z.string().default("en"),
+  pageCount: z.number().optional(),
 })
 
-if (existingDownloads.length > 0) {
-  const alreadyOwned = existingDownloads.map(d => d.bookId)
-  return NextResponse.json(
-    { error: "You already own some of these books", bookIds: alreadyOwned },
-    { status: 400 }
-  )
-}
+// ✅ Option B — keep schema, manually map in the route
+const book = await prisma.book.create({
+  data: {
+    title: validatedData.title,
+    author: validatedData.author,
+    description: validatedData.description,
+    price: validatedData.price,
+    isFree: validatedData.isFree,
+    coverUrl: validatedData.coverUrl || null,
+    fileKey: validatedData.fileKey || "",
+    genres: validatedData.genres,
+    language: validatedData.language || "en",
+    pageCount: validatedData.pages || null,
+  }
+})
 ```
 
 ---
 
-### 5. Partial `bookIds` are silently accepted — price can be manipulated
-**File:** `app/api/orders/route.ts`
+### BUG 7 — `DELETE /api/books/[id]` crashes on books with purchases or reviews
+**File:** `app/api/books/[id]/route.ts`
 
-The client sends `bookIds: ["id1", "id2"]` and the server fetches whatever books match. If one ID is invalid (typo, deleted book, wrong ID), it's silently dropped. The order is then created for fewer books than the user intended, at a lower total — potentially `0` — with no error. A crafty user could also send a mix of real IDs and garbage to manipulate the total.
+`prisma.book.delete()` fails with a foreign key constraint error whenever the book has `OrderItem`, `Download`, or `Review` records. The schema has no `onDelete: Cascade` configured.
 
 ```ts
-// ❌ Current — silently proceeds with partial results
-const books = await prisma.book.findMany({ where: { id: { in: bookIds } } })
-if (books.length === 0) { return error }  // only catches total failure
+// ❌ Current — throws FK constraint error
+await prisma.book.delete({ where: { id: params.id } })
 
-// ✅ Fix — validate all requested IDs were found
-if (books.length !== bookIds.length) {
-  return NextResponse.json(
-    { error: "One or more books could not be found" },
-    { status: 400 }
-  )
+// ✅ Fix — delete children first in a transaction
+await prisma.$transaction([
+  prisma.review.deleteMany({ where: { bookId: params.id } }),
+  prisma.download.deleteMany({ where: { bookId: params.id } }),
+  prisma.orderItem.deleteMany({ where: { bookId: params.id } }),
+  prisma.book.delete({ where: { id: params.id } }),
+])
+```
+
+---
+
+### BUG 8 — Upload route uses undefined env var `R2_CUSTOM_DOMAIN`
+**File:** `app/api/upload/route.ts`
+
+```ts
+// ❌ R2_CUSTOM_DOMAIN is never defined anywhere — evaluates to "https://undefined/..."
+const publicUrl = `https://${process.env.R2_CUSTOM_DOMAIN}/${fileKey}`
+
+// ✅ Fix
+const publicUrl = `${process.env.R2_PUBLIC_URL}/${fileKey}`
+```
+
+---
+
+## Broken Feature Flows
+
+---
+
+### FLOW 1 — Seed will fail (blocks all development)
+**File:** `prisma/seed.ts`
+
+Four separate problems:
+
+```ts
+// ❌ Problem 1: wrong field name
+create: { password: adminPassword }  // → passwordHash: adminPassword
+
+// ❌ Problem 2: upsert on non-unique field 'title' (Book has no @unique on title)
+where: { title: book.title }  // → use isbn after adding it to seed books
+
+// ❌ Problem 3: unknown field 'fileFormat' on Book model
+fileFormat: "PDF, EPUB"  // → remove entirely
+
+// ❌ Problem 4: missing required field 'fileKey' on Book
+// → add fileKey: "placeholder/filename.pdf" to each seed book
+
+// ❌ Problem 5: seed creates its own PrismaClient with no adapter
+const prisma = new PrismaClient()  // → needs adapter in v7
+```
+
+The corrected seed:
+```ts
+import "dotenv/config"
+import { PrismaClient } from '../src/generated/prisma/client'
+import { PrismaPg } from '@prisma/adapter-pg'
+import pg from 'pg'
+import bcrypt from "bcryptjs"
+
+async function main() {
+  const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL })
+  const adapter = new PrismaPg(pool)
+  const prisma = new PrismaClient({ adapter })
+
+  const adminPassword = await bcrypt.hash("admin123", 10)
+
+  await prisma.user.upsert({
+    where: { email: "admin@kitabu.com" },
+    update: {},
+    create: {
+      email: "admin@kitabu.com",
+      name: "Admin User",
+      passwordHash: adminPassword,   // ✅ correct field
+      role: "ADMIN",
+    },
+  })
+
+  const books = [
+    {
+      isbn: "978-9966-001-01-1",     // ✅ unique field for upsert
+      title: "The Art of Business Strategy",
+      author: "James Kimani",
+      description: "A comprehensive guide to modern business strategy in the African context.",
+      price: 1500,
+      isFree: false,
+      coverUrl: "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=400&h=600&fit=crop",
+      fileKey: "placeholder/art-of-business-strategy.pdf",  // ✅ required field
+      genres: ["Business", "Strategy"],
+      language: "en",                // ✅ matches schema default
+    },
+    // ... other books same pattern
+  ]
+
+  for (const book of books) {
+    await prisma.book.upsert({
+      where: { isbn: book.isbn },    // ✅ @unique field
+      update: {},
+      create: book,
+    })
+  }
+
+  await prisma.$disconnect()
+  await pool.end()
 }
 ```
 
 ---
 
-### 6. Webhook returns `404` for unknown orders — IntaSend will keep retrying
-**File:** `app/api/webhooks/intasend/route.ts`
+### FLOW 2 — `SessionProvider` missing — all auth hooks broken
+**File:** `app/layout.tsx`
 
-When IntaSend sends a webhook for an order ID that doesn't exist (race condition, test event, replayed payload), the route returns `{ status: 404 }`. Most payment providers treat any non-`2xx` response as a failure and retry — potentially dozens of times. This can cause noise in logs, unnecessary DB queries, and alert fatigue.
+`useSession()` is called in `checkout/page.tsx`, `my-library/page.tsx`, `header.tsx`, and others. Without `<SessionProvider>`, all of them return `{ data: null, status: "loading" }` forever — checkout never proceeds, my-library never loads, the header never shows the user's name.
 
-Standard webhook practice is to always return `200` even for unrecognized or irrelevant events, and handle the logic internally.
+```tsx
+// ✅ Fix layout.tsx
+import { SessionProvider } from 'next-auth/react'
+
+// wrap children:
+<SessionProvider>
+  <QueryProvider>
+    {children}
+    <Toaster position="top-center" richColors />
+  </QueryProvider>
+</SessionProvider>
+```
+
+---
+
+### FLOW 3 — `admin/page.tsx` missing `"use client"` — build error
+**File:** `app/admin/page.tsx`
+
+The file uses `useQuery` (a React hook) but has no `"use client"` directive. Next.js treats it as a Server Component and throws at build time. The admin dashboard never renders.
+
+```tsx
+// ✅ Add as very first line
+"use client"
+```
+
+---
+
+### FLOW 4 — `admin/books/page.tsx` uses `<Link>` without importing it — compile error
+**File:** `app/admin/books/page.tsx`
+
+`<Link>` is used in the View dropdown item but is not in the imports. This is a compile error that prevents the admin books page from building.
+
+```ts
+// ✅ Add to imports
+import Link from "next/link"
+```
+
+---
+
+### FLOW 5 — My Library shows ALL books to every user, downloads fail silently
+**File:** `app/my-library/page.tsx`
+
+Two broken endpoints:
+
+```ts
+// ❌ Query — fetches public catalogue, not purchased books
+const res = await fetch(`/api/books?purchased=true`)
+// 'purchased' param is ignored by GET /api/books — returns all books to everyone
+
+// ✅ Fix — create GET /api/my-library that queries Download records
+const res = await fetch(`/api/my-library`)
+
+// ❌ Download handler — calls wrong endpoint, checks wrong field
+const res = await fetch(`/api/books/${book.id}`)   // returns metadata, not a signed URL
+if (data.downloadUrl) { ... }                       // field doesn't exist on that response
+
+// ✅ Fix
+const res = await fetch(`/api/downloads/${book.id}`)
+if (data.url) { window.open(data.url, '_blank') }
+```
+
+Also: `<Image src={book.coverUrl} />` has no fallback — `coverUrl` is nullable in the schema and will crash `<Image>` if null.
+
+---
+
+### FLOW 6 — Cart page is completely disconnected from the Zustand store
+**File:** `app/cart/page.tsx`
+
+The cart page uses `useState(initialCartItems)` with hardcoded mock data. The Zustand store (`lib/store/cart.ts`) is what every other page uses — `header.tsx` (badge count), `books/[id]/page.tsx` (add to cart), `checkout/page.tsx` (items list). The cart page shows fake items, removing them has no effect on the real cart, and the checkout will proceed with different items than what the user sees.
 
 ```ts
 // ❌ Current
-if (!order) {
-  return NextResponse.json({ error: "Order not found" }, { status: 404 })
-}
+const [cartItems, setCartItems] = useState<CartItem[]>(initialCartItems)
+const removeItem = (id: string) => { setCartItems(...) }
 
-// ✅ Fix — acknowledge receipt, log internally
-if (!order) {
-  console.warn("Webhook received for unknown orderId:", orderId)
-  return NextResponse.json({ message: "Order not found, ignoring" }, { status: 200 })
-}
+// ✅ Fix
+import { useCart } from "@/lib/store/cart"
+const { items: cartItems, removeItem } = useCart()
+// remove all mock data, remove initialCartItems, remove useState for cart
 ```
 
 ---
 
-### 7. `PATCH /api/admin/users` accepts any string as a role
-**File:** `app/api/admin/users/route.ts`
+### FLOW 7 — Orders page shows hardcoded mock data
+**File:** `app/orders/page.tsx`
 
-The role update endpoint reads `role` from the request body and passes it directly to Prisma with no validation. An admin (or anyone who spoofs an admin session) could set a user's role to any arbitrary string — `"SUPERADMIN"`, `"root"`, `""` — causing a Prisma enum validation error or corrupting the user record.
+The page renders a static `const orders = [...]` array — real user orders never appear. There is also no `GET /api/orders` endpoint for listing a user's own orders (only `GET /api/orders/[id]` exists for a single order lookup).
 
-```ts
-// ❌ Current — unvalidated role written to DB
-const { userId, role } = await req.json()
-await prisma.user.update({ where: { id: userId }, data: { role } })
-
-// ✅ Fix — validate against the known enum values
-const validRoles = ['ADMIN', 'MEMBER'] as const
-if (!validRoles.includes(role)) {
-  return NextResponse.json({ error: "Invalid role" }, { status: 400 })
-}
-```
+Fix requires:
+1. Create `GET /api/orders` that queries `prisma.order.findMany({ where: { userId: session.user.id } })`
+2. Replace the mock array in `orders/page.tsx` with a `useQuery` call to that endpoint
 
 ---
 
-### 8. `POST /api/orders` creates a PENDING order even when IntaSend fails
-**File:** `app/api/orders/route.ts`
+### FLOW 8 — `checkout/success` page does not exist
+**File:** `app/checkout/` (only `page.tsx` present)
 
-The flow is: create order in DB → call IntaSend → if IntaSend throws, return `502`. But the order record already exists in the database as `PENDING` with no way for the user to retry or for the system to clean it up. Over time this produces orphaned PENDING orders that inflate counts and pollute admin reporting.
-
-```ts
-// ✅ Fix — defer DB creation until after IntaSend succeeds, or clean up on failure
-try {
-  const checkout = await intasend.collection().charge({ ... })
-
-  // Only create order after payment gateway confirms
-  const order = await prisma.order.create({ ... })
-  await prisma.order.update({ where: { id: order.id }, data: { intasendRef: checkout.id } })
-
-  return NextResponse.json({ url: checkout.url, orderId: order.id })
-} catch (intasendError) {
-  // No orphaned DB record
-  return NextResponse.json({ error: "Payment gateway error" }, { status: 502 })
-}
+`POST /api/orders` tells IntaSend to redirect to:
 ```
-
-Alternatively, add a cleanup job or set a TTL-based status sweep for stale PENDING orders.
+${NEXTAUTH_URL}/checkout/success?orderId=${order.id}
+```
+After payment, IntaSend sends the user to this URL. The page doesn't exist — users land on a 404 immediately after paying. `app/checkout/success/page.tsx` needs to be created.
 
 ---
 
-### 9. `GET /api/orders/[id]` fetches the order before verifying ownership
-**File:** `app/api/orders/[id]/route.ts`
-
-The route fetches the full order (including all items and book details) and then checks `order.userId !== session.user.id`. If the check fails, a `403` is returned — but the data was already fetched from the database. This is not an exploitable leak since the response is never sent, but it's an unnecessary DB query on every unauthorized access and a pattern that becomes risky if the ownership check is ever accidentally removed or reordered.
+### FLOW 9 — Free books charged through IntaSend, `phoneNumber` dropped
+**File:** `app/api/orders/route.ts` + `app/checkout/page.tsx`
 
 ```ts
-// ✅ Fix — push userId into the query itself, fetch only if owned
-const order = await prisma.order.findUnique({
-  where: {
-    id: params.id,
-    userId: session.user.id   // ownership enforced at DB level
-  },
-  include: { ... }
-})
+// ❌ Free books still sent to IntaSend with amount: 0
+const total = books.reduce((sum, b) => sum + Number(b.price), 0)
+// No branch for total === 0
 
-if (!order) {
-  // Covers both "not found" and "not yours" without leaking which it is
-  return NextResponse.json({ error: "Order not found" }, { status: 404 })
+// ✅ Add before the IntaSend call:
+if (total === 0) {
+  await prisma.order.update({ where: { id: order.id }, data: { status: 'PAID' } })
+  await prisma.download.createMany({
+    data: books.map(b => ({ userId: session.user.id!, bookId: b.id })),
+    skipDuplicates: true,
+  })
+  return NextResponse.json({ orderId: order.id, free: true })
 }
 ```
 
----
-
-## 🟡 Minor Data Concerns
-
----
-
-### 10. `log: ['query']` is on in production
-**File:** `lib/prisma.ts`
+Also: `phoneNumber` is captured in state on the checkout page but never sent in the API body. M-Pesa STK Push requires it.
 
 ```ts
-new PrismaClient({ log: ['query'] })
-```
+// ❌ phoneNumber collected but not sent
+body: JSON.stringify({ bookIds: items.map(item => item.id) })
 
-This logs every SQL query — including those with user emails, order IDs, and potentially partial data — to stdout in all environments including production. On a hosted platform this ends up in logs that may be retained, searched, or accessible to support staff. Query logging should be development-only.
-
-```ts
-export const prisma = globalForPrisma.prisma ?? new PrismaClient({
-  log: process.env.NODE_ENV === 'development' ? ['query'] : [],
-})
+// ✅ Fix
+body: JSON.stringify({ bookIds: items.map(item => item.id), phoneNumber })
+// Also add phoneNumber to orderSchema in lib/validations/index.ts
+// And forward it to intasend.collection().charge({ phone_number: phoneNumber })
 ```
 
 ---
 
-### 11. `GET /api/books` returns all books with no pagination
-**File:** `app/api/books/route.ts`
+### FLOW 10 — Cart not cleared after checkout redirect
+**File:** `app/checkout/page.tsx`
 
-The query has no `take` or `skip`. As the catalogue grows, this returns the entire table in a single response — increasing latency, memory usage, and response payload size. At a few hundred books this becomes noticeable; at thousands it becomes a problem.
+After `window.location.href = data.url`, the Zustand cart is never cleared. When the user returns from IntaSend, all paid-for items are still sitting in the cart.
 
 ```ts
-// ✅ Add basic pagination
-const page = Number(searchParams.get("page") || 1)
-const limit = Number(searchParams.get("limit") || 20)
+// ✅ Fix — add clearCart to the component
+const clearCart = useCart((state) => state.clearCart)
 
-const books = await prisma.book.findMany({
-  where: { ... },
-  orderBy: { createdAt: 'desc' },
-  take: limit,
-  skip: (page - 1) * limit,
-})
+// in handleCheckout, before redirect:
+clearCart()
+window.location.href = data.url
 ```
 
 ---
 
-### 12. Admin role check uses `@ts-ignore` instead of proper session typing
-**Files:** Multiple admin routes
+## Full Issue List
 
-Every admin route suppresses TypeScript with `// @ts-ignore` to access `session?.user?.role`. This means if the session type is ever changed or the role is renamed, there's no compile-time safety net — it silently breaks. The fix is to extend the NextAuth session type once in a `types/next-auth.d.ts` declaration file.
-
-```ts
-// types/next-auth.d.ts
-import { DefaultSession } from "next-auth"
-
-declare module "next-auth" {
-  interface Session {
-    user: {
-      id: string
-      role: "ADMIN" | "MEMBER"
-    } & DefaultSession["user"]
-  }
-}
-```
-
-This removes all `@ts-ignore` comments and gives full type safety on `session.user.role` and `session.user.id` across every route.
-
----
-
-## Summary
-
-| # | Severity | Issue |
-|---|---|---|
-| 1 | 🔴 | `fileKey` exposed on all public book endpoints |
-| 2 | 🔴 | `lib/prisma.ts` uses v6 client pattern — incompatible with v7 |
-| 3 | 🔴 | Admin stats/orders still use `order.amount` instead of `totalAmount` |
-| 4 | 🟠 | No duplicate ownership check — users can pay for a book twice |
-| 5 | 🟠 | Partial `bookIds` silently accepted — price can be under-counted |
-| 6 | 🟠 | Webhook returns 404 on unknown order — causes IntaSend retries |
-| 7 | 🟠 | `PATCH /api/admin/users` accepts any arbitrary role string |
-| 8 | 🟠 | Orphaned PENDING orders created when IntaSend call fails |
-| 9 | 🟠 | Ownership check happens after order data is already fetched |
-| 10 | 🟡 | Query logging active in production |
-| 11 | 🟡 | No pagination on `GET /api/books` |
-| 12 | 🟡 | Admin role checks use `@ts-ignore` instead of typed session |
+| # | Severity | Location | Issue |
+|---|---|---|---|
+| 1 | 🔴 500 on all routes | `prisma/schema.prisma` | Wrong generator provider `prisma-client-js` → `prisma-client` |
+| 2 | 🔴 500 on all routes | `lib/prisma.ts` | No driver adapter — v7 requires `PrismaPg` + `pg.Pool` |
+| 3 | 🔴 500 on all routes | `package.json` | Missing `@prisma/adapter-pg`, `pg`, `dotenv` |
+| 4 | 🔴 500 | `api/admin/stats` | `_sum: { amount }` → `totalAmount` (×3) |
+| 5 | 🔴 500 | `api/admin/orders` | `order.amount` → `order.totalAmount` (×2) |
+| 6 | 🔴 500 | `api/books` POST | `bookSchema` has wrong fields — Prisma create fails |
+| 7 | 🔴 500 | `api/books/[id]` DELETE | No cascade — FK constraint error on books with orders/reviews |
+| 8 | 🔴 broken | `api/upload` | `R2_CUSTOM_DOMAIN` undefined → `R2_PUBLIC_URL` |
+| 9 | 🔴 build error | `app/admin/page.tsx` | Missing `"use client"` directive |
+| 10 | 🔴 compile error | `app/admin/books/page.tsx` | Missing `import Link from "next/link"` |
+| 11 | 🔴 broken | `app/layout.tsx` | Missing `<SessionProvider>` — all auth hooks return null |
+| 12 | 🔴 broken | `prisma/seed.ts` | `password` → `passwordHash`, bad upsert key, unknown fields, no adapter |
+| 13 | 🟠 broken feature | `app/my-library/page.tsx` | Wrong query endpoint, wrong download endpoint, no `coverUrl` fallback |
+| 14 | 🟠 broken feature | `app/cart/page.tsx` | Hardcoded mock data, disconnected from Zustand store |
+| 15 | 🟠 broken feature | `app/orders/page.tsx` | Hardcoded mock data, no `GET /api/orders` user list route |
+| 16 | 🟠 broken feature | `app/checkout/success` | Page doesn't exist — users hit 404 after paying |
+| 17 | 🟠 broken feature | `api/orders` POST | Free books charged through IntaSend |
+| 18 | 🟠 broken feature | `app/checkout/page.tsx` | `phoneNumber` never sent to API |
+| 19 | 🟠 broken feature | `app/checkout/page.tsx` | Cart never cleared after redirect |
+| 20 | 🟠 broken feature | `lib/validations/index.ts` | `bookSchema` fields mismatch Prisma model |

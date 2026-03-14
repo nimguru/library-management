@@ -1,9 +1,14 @@
-import { PrismaClient } from "@prisma/client"
+import "dotenv/config"
+import { PrismaClient } from "../src/generated/prisma/client/client"
+import { PrismaPg } from "@prisma/adapter-pg"
+import pg from "pg"
 import bcrypt from "bcryptjs"
 
-const prisma = new PrismaClient()
-
 async function main() {
+  const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL })
+  const adapter = new PrismaPg(pool as any)
+  const prisma = new PrismaClient({ adapter })
+
   const adminPassword = await bcrypt.hash("admin123", 10)
   
   // Create Admin
@@ -30,6 +35,7 @@ async function main() {
       price: 1500,
       isFree: false,
       coverUrl: "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=400&h=600&fit=crop",
+      fileKey: "seeds/the-art-of-business-strategy.pdf",
       genres: ["Business", "Strategy"],
       language: "en",
     },
@@ -41,6 +47,7 @@ async function main() {
       price: 2000,
       isFree: false,
       coverUrl: "https://images.unsplash.com/photo-1515879218367-8466d910aaa4?w=400&h=600&fit=crop",
+      fileKey: "seeds/modern-web-development.pdf",
       genres: ["Technology", "Programming"],
       language: "en",
     },
@@ -52,35 +59,26 @@ async function main() {
       price: 0,
       isFree: true,
       coverUrl: "https://images.unsplash.com/photo-1456324504439-367cee3b3c32?w=400&h=600&fit=crop",
+      fileKey: "seeds/mindful-leadership.pdf",
       genres: ["Self-Help", "Leadership"],
       language: "en",
     },
   ]
 
   for (const book of books) {
-    // Check if book exists by title (since title isn't unique, we just take the first one or create)
-    const existing = await prisma.book.findFirst({
-      where: { title: book.title }
+    await prisma.book.upsert({
+      where: { isbn: book.isbn },
+      update: {},
+      create: book,
     })
-
-    if (!existing) {
-      await prisma.book.create({
-        data: {
-          ...book,
-          fileKey: `seeds/${book.title.toLowerCase().replace(/ /g, '-')}.pdf` // Mock file key
-        }
-      })
-    }
   }
 
   console.log("Seeding finished.")
+  await prisma.$disconnect()
+  await pool.end()
 }
 
-main()
-  .catch((e) => {
-    console.error(e)
-    process.exit(1)
-  })
-  .finally(async () => {
-    await prisma.$disconnect()
-  })
+main().catch((e) => {
+  console.error(e)
+  process.exit(1)
+})
